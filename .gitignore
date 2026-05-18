@@ -1,0 +1,33 @@
+.DS_Store
+Thumbs.db
+
+*.tmp
+*.bak
+*.log
+
+.idea/
+.vscode/
+
+# Project-local agent skills are restored from skills-lock.json.
+.agents/skills/
+
+# Local release staging artifacts.
+.release/
+
+# Brainstorming visual companion artifacts.
+.superpowers/
+
+# Rust build artifacts
+src-tauri/target/
+
+# Tauri generated schemas
+src-tauri/gen/
+
+# npm
+node_modules/
+
+# Local settings (personal tokens, permissions)
+.claude/settings.local.json
+
+# Debug tracking
+debug/
