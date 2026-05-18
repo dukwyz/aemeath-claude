@@ -454,7 +454,9 @@ cargo build --manifest-path src-tauri/Cargo.toml --release
 
 ## 来源与授权
 
+- 基于 [77wilNd/aemeath_withclaude](https://github.com/77wilNd/aemeath_withclaude) 改造，MIT License
 - 像素小人素材来源：[lzy-buaa-jdi/aemeath](https://github.com/lzy-buaa-jdi/aemeath)，MIT License
+- Q 版精灵图素材：[cuNuo/aemeath-mini-codex-pet](https://github.com/cuNuo/aemeath-mini-codex-pet)，MIT License
 - 爱弥斯、《鸣潮》及相关官方视觉设定归其权利方所有
 - 本仓库仅包含整理后的桌宠代码、精灵图集，不含官方立绘原图
 
