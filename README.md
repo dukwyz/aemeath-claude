@@ -450,7 +450,13 @@ cargo build --manifest-path src-tauri/Cargo.toml --release
 
 - [77wilNd/aemeath_withclaude](https://github.com/77wilNd/aemeath_withclaude) — 原版桌宠，MIT 许可
 - [cuNuo/aemeath-mini-codex-pet](https://github.com/cuNuo/aemeath-mini-codex-pet) — Q 版精灵图素材，MIT 许可
-- 《鸣潮》爱弥斯（Ameth）角色 — 库洛游戏
+- [lzy-buaa-jdi/aemeath](https://github.com/lzy-buaa-jdi/aemeath) — 像素小人素材来源，MIT License
+
+## 来源与授权
+
+- 像素小人素材来源：[lzy-buaa-jdi/aemeath](https://github.com/lzy-buaa-jdi/aemeath)，MIT License
+- 爱弥斯、《鸣潮》及相关官方视觉设定归其权利方所有
+- 本仓库仅包含整理后的桌宠代码、精灵图集，不含官方立绘原图
 
 ## License
 
