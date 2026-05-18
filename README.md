@@ -8,6 +8,8 @@
 
 Q 版像素爱弥斯（Aemeath）桌面宠物，与 Claude Code 实时联动。基于 [aemeath_withclaude](https://github.com/77wilNd/aemeath_withclaude) 改造，新增持久化气泡、游戏自动隐身、idle 提醒等功能。
 
+![demo](preview/demo.gif)
+
 ---
 
 ## 截图预览
