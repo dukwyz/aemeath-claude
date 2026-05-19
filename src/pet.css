@@ -30,6 +30,8 @@ html, body {
   background-size: 1536px 3120px;
   background-repeat: no-repeat;
   image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  image-rendering: -webkit-optimize-contrast;
   transition: opacity 0.3s ease;
   flex-shrink: 0;
 }
