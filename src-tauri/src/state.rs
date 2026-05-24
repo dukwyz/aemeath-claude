@@ -20,6 +20,13 @@ pub enum PetState {
     Permission,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum RunningVariant {
+    Default,    // "running" - original side-view
+    Left,       // "running-left" - mirrored
+    Right,      // "running-right" - alternate
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateRecord {
     pub state: PetState,
@@ -40,6 +47,8 @@ pub struct StateManager {
     current_tool: Option<String>,
     history: Vec<StateRecord>,
     pub last_transition: u64,
+    running_variant: RunningVariant,
+    variant_counter: u32,
 }
 
 impl PetState {
@@ -116,6 +125,38 @@ impl StateManager {
             current_tool: None,
             history: Vec::new(),
             last_transition: 0,
+            running_variant: RunningVariant::Default,
+            variant_counter: 0,
+        }
+    }
+
+    /// Cycle through running variants: Default → Left → Right → Default → ...
+    pub fn set_running_variant(&mut self) {
+        self.running_variant = match self.running_variant {
+            RunningVariant::Default => RunningVariant::Left,
+            RunningVariant::Left => RunningVariant::Right,
+            RunningVariant::Right => RunningVariant::Default,
+        };
+        self.variant_counter += 1;
+    }
+
+    /// Get the current animation name, handling running variant rotation.
+    pub fn current_animation_name(&self) -> String {
+        match &self.current {
+            PetState::Running => match self.running_variant {
+                RunningVariant::Default => "running".to_string(),
+                RunningVariant::Left => "running-left".to_string(),
+                RunningVariant::Right => "running-right".to_string(),
+            },
+            other => other.animation_name().to_string(),
+        }
+    }
+
+    /// Branch on tool type: Read/Glob/Grep → Review, others → Celebrating
+    pub fn done_state_for_tool(tool: Option<&str>) -> PetState {
+        match tool {
+            Some("Read") | Some("Glob") | Some("Grep") | Some("Agent") => PetState::Review,
+            _ => PetState::Celebrating,
         }
     }
 
@@ -246,6 +287,32 @@ mod tests {
         assert_eq!(PetState::Analyzing.animation_name(), "analyzing");
         assert_eq!(PetState::Building.animation_name(), "building");
         assert_eq!(PetState::Celebrating.animation_name(), "celebrating");
+    }
+
+    #[test]
+    fn test_running_variant_rotation() {
+        let mut sm = StateManager::new();
+        sm.set_state(PetState::Running, Some("Bash".into()));
+
+        // Default → Left → Right → Default cycle
+        assert_eq!(sm.current_animation_name(), "running");
+        sm.set_running_variant();
+        assert_eq!(sm.current_animation_name(), "running-left");
+        sm.set_running_variant();
+        assert_eq!(sm.current_animation_name(), "running-right");
+        sm.set_running_variant();
+        assert_eq!(sm.current_animation_name(), "running");
+    }
+
+    #[test]
+    fn test_done_state_for_tool() {
+        assert_eq!(StateManager::done_state_for_tool(Some("Read")), PetState::Review);
+        assert_eq!(StateManager::done_state_for_tool(Some("Glob")), PetState::Review);
+        assert_eq!(StateManager::done_state_for_tool(Some("Grep")), PetState::Review);
+        assert_eq!(StateManager::done_state_for_tool(Some("Agent")), PetState::Review);
+        assert_eq!(StateManager::done_state_for_tool(Some("Write")), PetState::Celebrating);
+        assert_eq!(StateManager::done_state_for_tool(Some("Bash")), PetState::Celebrating);
+        assert_eq!(StateManager::done_state_for_tool(None), PetState::Celebrating);
     }
 
     #[test]

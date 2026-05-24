@@ -1,29 +1,37 @@
 #!/usr/bin/env python3
 """
-Game Guard — 自动检测全屏游戏，隐身/显示爱弥斯桌宠。
+Game Guard - auto-detect fullscreen windows, hide/show Aemeath desktop pet.
 
-使用方式：python game_guard.py
-后台运行，检测到全屏窗口时自动隐藏桌宠，切回桌面时自动显示。
-
-原理：通过 Win32 API 检测当前前台窗口是否为全屏（覆盖整个屏幕）。
+Usage: python game_guard.py
+Runs in background, hides pet when fullscreen window detected, shows when back to desktop.
+Supports browser fullscreen (Bilibili), game fullscreen, and borderless fullscreen.
 """
 
 import ctypes
 import ctypes.wintypes
 import time
 import urllib.request
-import json
 import sys
+import os
 
 PET_URL = "http://127.0.0.1:9527"
 CHECK_INTERVAL = 3  # seconds
 
-# 始终全屏的系统窗口，排除误判
+# Log file for debugging (pythonw has no console)
+LOG_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(LOG_DIR, "game_guard.log")
+
+# System fullscreen windows to exclude
 SYSTEM_FULLSCREEN_TITLES = [
     "Program Manager",
-    "Windows 输入体验",
-    "Windows Input Experience",
 ]
+
+# Window classes to exclude (desktop shell)
+EXCLUDED_CLASSES = ["Progman", "WorkerW"]
+
+# Win32 API constants
+WS_POPUP = 0x80000000
+WS_CAPTION = 0x00C00000  # WS_BORDER | WS_DLGFRAME
 
 # Win32 API
 user32 = ctypes.windll.user32
@@ -31,6 +39,14 @@ user32 = ctypes.windll.user32
 class RECT(ctypes.Structure):
     _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
                  ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+def log(msg):
+    """Write to log file."""
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write("[%s] %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg))
+    except Exception:
+        pass
 
 def get_foreground_window_info():
     """Get the foreground window's title, class, and dimensions."""
@@ -54,14 +70,44 @@ def get_foreground_window_info():
     user32.GetWindowRect(hwnd, ctypes.byref(rect))
     width = rect.right - rect.left
     height = rect.bottom - rect.top
+    x = rect.left
+    y = rect.top
 
-    # Get screen size
+    # Get screen size (logical pixels)
     screen_w = user32.GetSystemMetrics(0)
     screen_h = user32.GetSystemMetrics(1)
 
-    # Check window style (WS_POPUP = fullscreen-like)
+    # Check window styles
     style = user32.GetWindowLongW(hwnd, -16)  # GWL_STYLE
-    is_popup = bool(style & 0x80000000)  # WS_POPUP
+    is_popup = bool(style & WS_POPUP)
+    has_caption = bool(style & WS_CAPTION)
+
+    # === Fullscreen detection (2 methods) ===
+
+    # Method 1: Traditional fullscreen (game exclusive/borderless)
+    #   Size ~= screen AND (WS_POPUP or no caption)
+    #   Works for: game fullscreen, game borderless fullscreen
+    is_traditional = (
+        width >= screen_w - 15 and height >= screen_h - 15
+        and (is_popup or not has_caption)
+    )
+
+    # Method 2: Browser fullscreen (HTML5 Fullscreen API, F11)
+    #   Size >= 95% screen AND no caption bar
+    #   The no-caption check distinguishes from maximized windows (which have caption)
+    #   Works for: Bilibili, YouTube, any browser fullscreen
+    is_browser = (
+        width >= int(screen_w * 0.95) and height >= int(screen_h * 0.95)
+        and not has_caption
+    )
+
+    # Exclude system windows
+    is_excluded = (
+        class_name in EXCLUDED_CLASSES
+        or any(t in title for t in SYSTEM_FULLSCREEN_TITLES)
+    )
+
+    is_fullscreen = (is_traditional or is_browser) and not is_excluded
 
     return {
         "hwnd": hwnd,
@@ -69,17 +115,23 @@ def get_foreground_window_info():
         "class": class_name,
         "width": width,
         "height": height,
+        "x": x,
+        "y": y,
         "screen_w": screen_w,
         "screen_h": screen_h,
-        "is_fullscreen": (width >= screen_w and height >= screen_h) and not any(t in title for t in SYSTEM_FULLSCREEN_TITLES),
+        "is_fullscreen": is_fullscreen,
+        "is_traditional": is_traditional,
+        "is_browser": is_browser,
         "is_popup": is_popup,
+        "has_caption": has_caption,
+        "is_excluded": is_excluded,
     }
 
 def pet_request(path):
     """Send HTTP request to pet server."""
     try:
         req = urllib.request.Request(
-            f"{PET_URL}{path}",
+            "%s%s" % (PET_URL, path),
             method="POST",
             data=b"",
         )
@@ -90,8 +142,9 @@ def pet_request(path):
 
 def main():
     was_hidden = False
+    log("STARTED pid=%d" % os.getpid())
     print("Game Guard started. Monitoring fullscreen windows...")
-    print(f"Checking every {CHECK_INTERVAL}s. Press Ctrl+C to stop.")
+    print("Checking every %ds. Press Ctrl+C to stop." % CHECK_INTERVAL)
 
     while True:
         try:
@@ -100,25 +153,33 @@ def main():
                 is_fs = info["is_fullscreen"]
 
                 if is_fs and not was_hidden:
-                    # Game detected → hide pet
                     if pet_request("/api/hide"):
-                        print(f"[HIDDEN] Fullscreen: {info['title'][:50]} ({info['width']}x{info['height']})")
+                        log("[HIDDEN] %s (%dx%d at %d,%d) cls=%s trad=%s browser=%s popup=%s caption=%s" % (
+                            info["title"][:40],
+                            info["width"], info["height"],
+                            info["x"], info["y"],
+                            info["class"],
+                            info["is_traditional"], info["is_browser"],
+                            info["is_popup"], info["has_caption"],
+                        ))
                     was_hidden = True
 
                 elif not is_fs and was_hidden:
-                    # Back to desktop → show pet
                     if pet_request("/api/show"):
-                        print(f"[SHOWN] Window: {info['title'][:50]}")
+                        log("[SHOWN] %s (%dx%d)" % (
+                            info["title"][:40],
+                            info["width"], info["height"],
+                        ))
                     was_hidden = False
 
         except KeyboardInterrupt:
+            log("STOPPED")
             print("\nGame Guard stopped.")
-            # Make sure pet is visible when we exit
             if was_hidden:
                 pet_request("/api/show")
             sys.exit(0)
-        except Exception as e:
-            pass  # Silently continue on errors
+        except Exception:
+            pass
 
         time.sleep(CHECK_INTERVAL)
 

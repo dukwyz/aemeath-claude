@@ -62,13 +62,17 @@ async fn handle_state(
 ) -> StatusCode {
     let pet_state = PetState::from_hook(&body.s, body.tool.as_deref());
     let tool = body.tool.clone();
-    let animation = pet_state.animation_name().to_string();
-    let bubble = pet_state.bubble_text(tool.as_deref()).to_string();
 
     {
         let mut mgr = app.state.lock().await;
         mgr.set_state(pet_state, tool);
     }
+
+    // Read back with variant awareness
+    let mgr = app.state.lock().await;
+    let animation = mgr.current_animation_name();
+    let bubble = mgr.current_state().bubble_text(mgr.current_tool()).to_string();
+    drop(mgr);
 
     let _ = app.tx.send(StateChangeEvent { animation, bubble });
     StatusCode::OK
@@ -82,10 +86,9 @@ async fn handle_current(
     State(app): State<AppState>,
 ) -> Json<CurrentResponse> {
     let mgr = app.state.lock().await;
-    let current = mgr.current_state();
     let tool = mgr.current_tool();
-    let animation = current.animation_name().to_string();
-    let bubble = current.bubble_text(tool).to_string();
+    let animation = mgr.current_animation_name();
+    let bubble = mgr.current_state().bubble_text(tool).to_string();
     Json(CurrentResponse { animation, bubble })
 }
 
@@ -113,14 +116,26 @@ async fn handle_hook_working(
         _ => PetState::Running,
     };
 
-    set_pet_state(&app, state, tool).await;
+    set_pet_state(&app, state.clone(), tool).await;
+
+    // Cycle running variant for idle-type tools (running/left/right rotation)
+    if matches!(state, PetState::Running) {
+        let mut mgr = app.state.lock().await;
+        mgr.set_running_variant();
+    }
+
     StatusCode::OK
 }
 
 async fn handle_hook_done(
     State(app): State<AppState>,
 ) -> StatusCode {
-    set_pet_state(&app, PetState::Celebrating, None).await;
+    // Branch on tool type: Read/Glob/Grep/Agent → Review, others → Celebrating
+    let done_state = {
+        let mgr = app.state.lock().await;
+        crate::state::StateManager::done_state_for_tool(mgr.current_tool())
+    };
+    set_pet_state(&app, done_state, None).await;
     StatusCode::OK
 }
 
@@ -146,27 +161,26 @@ async fn handle_hook_permission(
 }
 
 async fn set_pet_state(app: &AppState, state: PetState, tool: Option<String>) {
+    let mut mgr = app.state.lock().await;
+
+    // Protect tool bubble minimum display time (all active states)
+    let is_active = matches!(mgr.current_state(),
+        PetState::Running | PetState::Chatting | PetState::Fetching
+        | PetState::Searching | PetState::Analyzing | PetState::Building
+    );
+    if !matches!(state, PetState::Running | PetState::Chatting | PetState::Fetching
+        | PetState::Searching | PetState::Analyzing | PetState::Building)
+        && is_active
+        && mgr.should_keep_running(800)
     {
-        let mgr = app.state.lock().await;
-        // Protect tool bubble minimum display time (all active states)
-        let is_active = matches!(mgr.current_state(),
-            PetState::Running | PetState::Chatting | PetState::Fetching
-            | PetState::Searching | PetState::Analyzing | PetState::Building
-        );
-        if !matches!(state, PetState::Running | PetState::Chatting | PetState::Fetching
-            | PetState::Searching | PetState::Analyzing | PetState::Building)
-            && is_active
-            && mgr.should_keep_running(800)
-        {
-            return;
-        }
+        return;
     }
-    let animation = state.animation_name().to_string();
-    let bubble = state.bubble_text(tool.as_deref()).to_string();
-    {
-        let mut mgr = app.state.lock().await;
-        mgr.set_state(state, tool);
-    }
+
+    mgr.set_state(state, tool.clone());
+    let animation = mgr.current_animation_name();
+    let bubble = mgr.current_state().bubble_text(tool.as_deref()).to_string();
+    drop(mgr);
+
     let _ = app.tx.send(StateChangeEvent { animation, bubble });
 }
 

@@ -3,12 +3,47 @@ let bubble;
 let lastBubble = '';
 let toolLockUntil = 0;
 let idleStart = 0;
-let idleAnimTimer = null;
 let permissionPending = false;
-let permissionTimer = null;
-let permissionFadeTimer = null;
-let permissionClearTimer = null;
-let idleRemindTimer = null;
+let idleAnimActive = false;
+
+// Timer manager to prevent leaks
+const timerManager = {
+  _timers: new Map(),
+  set(name, fn, delay) {
+    this.clear(name);
+    const id = setTimeout(() => {
+      this._timers.delete(name);
+      fn();
+    }, delay);
+    this._timers.set(name, { id, type: 'timeout' });
+    return id;
+  },
+  setInterval(name, fn, delay) {
+    this.clear(name);
+    const id = setInterval(fn, delay);
+    this._timers.set(name, { id, type: 'interval' });
+    return id;
+  },
+  clear(name) {
+    const timer = this._timers.get(name);
+    if (!timer) return;
+    if (timer.type === 'timeout') clearTimeout(timer.id);
+    else clearInterval(timer.id);
+    this._timers.delete(name);
+  },
+  clearAll() {
+    for (const [name, timer] of this._timers) {
+      if (timer.type === 'timeout') clearTimeout(timer.id);
+      else clearInterval(timer.id);
+    }
+    this._timers.clear();
+  }
+};
+
+// Named timer aliases
+function setNamedTimeout(name, fn, delay) { return timerManager.set(name, fn, delay); }
+function setNamedInterval(name, fn, delay) { return timerManager.setInterval(name, fn, delay); }
+function clearNamedTimer(name) { timerManager.clear(name); }
 
 const IDLE_REMINDERS = [
   "小主还在吗~",
@@ -23,7 +58,8 @@ const IDLE_REMINDERS = [
 const IDLE_REMIND_INTERVAL = 120000 + Math.random() * 60000; // 2-3 min
 
 const PERSISTENT_STATES = new Set([
-  'running', 'chatting', 'fetching', 'searching', 'analyzing', 'building'
+  'running', 'running-left', 'running-right',
+  'chatting', 'fetching', 'searching', 'analyzing', 'building'
 ]);
 
 async function init() {
@@ -75,21 +111,21 @@ function shouldPersist(animation) {
 }
 
 function scheduleIdleRemind() {
-  if (idleRemindTimer) return;
-  idleRemindTimer = setTimeout(doIdleRemind, IDLE_REMIND_INTERVAL);
+  if (timerManager._timers.has('idleRemind')) return;
+  setNamedTimeout('idleRemind', doIdleRemind, IDLE_REMIND_INTERVAL);
 }
 function doIdleRemind() {
-  idleRemindTimer = null;
   if (!idleStart) return;
   const elapsed = Date.now() - idleStart;
   if (elapsed >= 300000) { // 5+ minutes idle
     const msg = IDLE_REMINDERS[Math.floor(Math.random() * IDLE_REMINDERS.length)];
+    lastBubble = msg;
     if (window._petBubble) window._petBubble.showPersistent(msg);
   }
   scheduleIdleRemind();
 }
 function cancelIdleRemind() {
-  if (idleRemindTimer) { clearTimeout(idleRemindTimer); idleRemindTimer = null; }
+  clearNamedTimer('idleRemind');
 }
 
 async function pollState() {
@@ -99,7 +135,10 @@ async function pollState() {
       if (r.ok) {
         const data = await r.json();
         if (data.animation) {
-          window._petAnimator.play(data.animation);
+          // 空闲动画播放中，跳过 idle → idle 的覆盖（但非 idle 状态仍正常切换）
+          if (!(idleAnimActive && data.animation === 'idle')) {
+            window._petAnimator.play(data.animation);
+          }
           // Approve/new message: clear permission on non-waving, non-idle
           if (permissionPending && data.animation !== 'waving' && data.animation !== 'idle') {
             exitPermission();
@@ -132,7 +171,7 @@ async function pollState() {
           if (data.bubble.includes('等待指示')) {
             if (!permissionPending) {
               permissionPending = true;
-              permissionTimer = setInterval(() => {
+              setNamedInterval('permissionRepeat', () => {
                 if (permissionPending && window._petBubble) {
                   window._petBubble.showPersistent('等待指示...');
                 }
@@ -173,9 +212,10 @@ async function pollState() {
 
 function exitPermission() {
   permissionPending = false;
-  if (permissionTimer) { clearInterval(permissionTimer); permissionTimer = null; }
-  if (permissionFadeTimer) { clearTimeout(permissionFadeTimer); permissionFadeTimer = null; }
-  if (permissionClearTimer) { clearTimeout(permissionClearTimer); permissionClearTimer = null; }
+  lastBubble = '';  // 重置，让下一次 poll 能正确刷新气泡
+  clearNamedTimer('permissionRepeat');
+  clearNamedTimer('permissionFade');
+  clearNamedTimer('permissionClear');
   // Reset opacity if it was faded
   if (window._petBubble) {
     window._petBubble.el.style.transition = '';
@@ -185,14 +225,14 @@ function exitPermission() {
 
 function schedulePermissionRecovery() {
   // 15s: start fading the persistent bubble
-  permissionFadeTimer = setTimeout(() => {
+  setNamedTimeout('permissionFade', () => {
     if (permissionPending && window._petBubble) {
       window._petBubble.el.style.transition = 'opacity 2s ease';
       window._petBubble.el.style.opacity = '0.4';
     }
   }, 15000);
   // 60s: fully clear permission state
-  permissionClearTimer = setTimeout(() => {
+  setNamedTimeout('permissionClear', () => {
     if (permissionPending) {
       if (window._petBubble) {
         window._petBubble.el.style.transition = 'opacity 0.5s ease';
@@ -205,17 +245,30 @@ function schedulePermissionRecovery() {
 }
 
 function scheduleIdleAnim() {
-  if (idleAnimTimer) return;
-  idleAnimTimer = setTimeout(doIdleAnim, 15000 + Math.random() * 30000);
+  if (timerManager._timers.has('idleAnim')) return;
+  setNamedTimeout('idleAnim', doIdleAnim, 15000 + Math.random() * 30000);
 }
 function doIdleAnim() {
-  idleAnimTimer = null;
   if (!idleStart) return;
+  idleAnimActive = true;
   const pick = ['jumping','waving','chatting'][Math.floor(Math.random()*3)];
   window._petAnimator.play(pick);
-  setTimeout(() => { if (window._petAnimator) window._petAnimator.play('idle'); scheduleIdleAnim(); }, 2000);
+  setNamedTimeout('idleAnimReturn', () => {
+    idleAnimActive = false;
+    if (!idleStart) return; // 已离开 idle，不再回退
+    if (window._petAnimator) window._petAnimator.play('idle');
+    scheduleIdleAnim();
+  }, 2000);
 }
 function cancelIdleAnim() {
-  if (idleAnimTimer) { clearTimeout(idleAnimTimer); idleAnimTimer = null; }
+  idleAnimActive = false;
+  clearNamedTimer('idleAnim');
+  clearNamedTimer('idleAnimReturn');
 }
+
+// Clean up all timers on page unload
+window.addEventListener('beforeunload', () => {
+  timerManager.clearAll();
+});
+
 document.addEventListener('DOMContentLoaded', init);
