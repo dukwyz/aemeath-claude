@@ -163,6 +163,11 @@ async fn handle_hook_permission(
 async fn set_pet_state(app: &AppState, state: PetState, tool: Option<String>) {
     let mut mgr = app.state.lock().await;
 
+    // Skip state changes while game_guard has forced the pet hidden (fullscreen)
+    if mgr.is_force_hidden() {
+        return;
+    }
+
     // Protect tool bubble minimum display time (all active states)
     let is_active = matches!(mgr.current_state(),
         PetState::Running | PetState::Chatting | PetState::Fetching
@@ -187,6 +192,10 @@ async fn set_pet_state(app: &AppState, state: PetState, tool: Option<String>) {
 async fn handle_hide(
     State(app): State<AppState>,
 ) -> StatusCode {
+    {
+        let mut mgr = app.state.lock().await;
+        mgr.force_hide();
+    }
     let _ = app.vis_tx.send(super::VisibilityEvent { visible: false });
     StatusCode::OK
 }
@@ -194,6 +203,10 @@ async fn handle_hide(
 async fn handle_show(
     State(app): State<AppState>,
 ) -> StatusCode {
+    {
+        let mut mgr = app.state.lock().await;
+        mgr.release_hide();
+    }
     let _ = app.vis_tx.send(super::VisibilityEvent { visible: true });
     StatusCode::OK
 }

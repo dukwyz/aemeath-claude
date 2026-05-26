@@ -49,6 +49,7 @@ pub struct StateManager {
     pub last_transition: u64,
     running_variant: RunningVariant,
     variant_counter: u32,
+    force_hidden: bool,
 }
 
 impl PetState {
@@ -127,7 +128,23 @@ impl StateManager {
             last_transition: 0,
             running_variant: RunningVariant::Default,
             variant_counter: 0,
+            force_hidden: false,
         }
+    }
+
+    /// game_guard calls this when hiding pet for fullscreen.
+    /// Prevents Claude hooks from showing the pet until explicitly released.
+    pub fn force_hide(&mut self) {
+        self.force_hidden = true;
+    }
+
+    /// game_guard calls this when showing pet (fullscreen exited).
+    pub fn release_hide(&mut self) {
+        self.force_hidden = false;
+    }
+
+    pub fn is_force_hidden(&self) -> bool {
+        self.force_hidden
     }
 
     /// Cycle through running variants: Default → Left → Right → Default → ...
