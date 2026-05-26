@@ -91,6 +91,33 @@ class Bubble {
       this.fadeTimer = null;
     }
   }
+
+  // ---- confirm button (permission) ----
+
+  showConfirm(text) {
+    const askBubble = document.getElementById('ask-bubble');
+    const askText = document.getElementById('ask-text');
+    const askRow = document.getElementById('ask-confirm-row');
+    if (!askBubble || !askText || !askRow) return;
+
+    askText.textContent = text || '等待指示...';
+    askRow.classList.remove('hidden');
+    askBubble.classList.remove('hidden');
+    askBubble.classList.add('visible');
+
+    // Hide regular bubble while confirm is showing
+    this.hide();
+  }
+
+  hideConfirm() {
+    const askBubble = document.getElementById('ask-bubble');
+    const askRow = document.getElementById('ask-confirm-row');
+    if (!askBubble) return;
+
+    askBubble.classList.remove('visible');
+    askBubble.classList.add('hidden');
+    if (askRow) askRow.classList.add('hidden');
+  }
 }
 
 window.Bubble = Bubble;

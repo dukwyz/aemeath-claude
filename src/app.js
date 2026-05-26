@@ -93,7 +93,30 @@ async function init() {
       }, 50);
     }
   });
+  setupConfirmButtons();
   pollState();
+}
+
+function setupConfirmButtons() {
+  const ipc = window.__TAURI_INTERNALS__;
+  const btnYes = document.getElementById('ask-confirm-yes');
+  const btnNo = document.getElementById('ask-confirm-no');
+  if (btnYes) {
+    btnYes.addEventListener('click', (e) => {
+      e.stopPropagation();
+      try { if (ipc && ipc.invoke) ipc.invoke('approve_permission'); } catch (_) {}
+      exitPermission();
+      if (window._petBubble) window._petBubble.hideConfirm();
+    });
+  }
+  if (btnNo) {
+    btnNo.addEventListener('click', (e) => {
+      e.stopPropagation();
+      try { if (ipc && ipc.invoke) ipc.invoke('deny_permission'); } catch (_) {}
+      exitPermission();
+      if (window._petBubble) window._petBubble.hideConfirm();
+    });
+  }
 }
 
 function isToolBubble(text) {
@@ -173,14 +196,14 @@ async function pollState() {
               permissionPending = true;
               setNamedInterval('permissionRepeat', () => {
                 if (permissionPending && window._petBubble) {
-                  window._petBubble.showPersistent('等待指示...');
+                  window._petBubble.showConfirm('等待指示...');
                 }
               }, 3000);
               // Progressive recovery: fade at 15s, clear at 60s
               schedulePermissionRecovery();
             }
             lastBubble = data.bubble;
-            window._petBubble.showPersistent(data.bubble);
+            window._petBubble.showConfirm(data.bubble);
           } else if (permissionPending) {
             if (isToolBubble(data.bubble)) {
               exitPermission();
@@ -220,26 +243,31 @@ function exitPermission() {
   if (window._petBubble) {
     window._petBubble.el.style.transition = '';
     window._petBubble.el.style.opacity = '';
+    window._petBubble.hideConfirm();
   }
 }
 
 function schedulePermissionRecovery() {
-  // 15s: start fading the persistent bubble
+  // 15s: start fading the ask-bubble
   setNamedTimeout('permissionFade', () => {
-    if (permissionPending && window._petBubble) {
-      window._petBubble.el.style.transition = 'opacity 2s ease';
-      window._petBubble.el.style.opacity = '0.4';
+    if (permissionPending) {
+      const askBubble = document.getElementById('ask-bubble');
+      if (askBubble) {
+        askBubble.style.transition = 'opacity 2s ease';
+        askBubble.style.opacity = '0.4';
+      }
     }
   }, 15000);
   // 60s: fully clear permission state
   setNamedTimeout('permissionClear', () => {
     if (permissionPending) {
-      if (window._petBubble) {
-        window._petBubble.el.style.transition = 'opacity 0.5s ease';
-        window._petBubble.el.style.opacity = '';
-        exitPermission();
-        window._petBubble.hide();
+      const askBubble = document.getElementById('ask-bubble');
+      if (askBubble) {
+        askBubble.style.transition = 'opacity 0.5s ease';
+        askBubble.style.opacity = '';
       }
+      exitPermission();
+      if (window._petBubble) window._petBubble.hideConfirm();
     }
   }, 60000);
 }

@@ -47,7 +47,7 @@ async fn main() {
 
     // Build Tauri app
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![start_drag, open_obsidian])
+        .invoke_handler(tauri::generate_handler![start_drag, open_obsidian, approve_permission, deny_permission])
         .setup(move |app| {
             // Listen to broadcast channel, forward state changes to frontend
             let handle = app.handle().clone();
@@ -107,4 +107,110 @@ fn open_obsidian() {
         .args(["/C", "start", "", "obsidian://open?vault=Obsidian%20Vault"])
         .creation_flags(CREATE_NO_WINDOW)
         .spawn();
+}
+
+// ---- Windows FFI for relay_to_terminal ----
+
+#[cfg(target_os = "windows")]
+mod winffi {
+    extern "system" {
+        pub fn EnumWindows(lpEnumFunc: isize, lParam: isize) -> i32;
+        pub fn GetWindowTextW(hWnd: isize, lpString: *mut u16, nMaxCount: i32) -> i32;
+        pub fn GetWindowTextLengthW(hWnd: isize) -> i32;
+        pub fn IsWindowVisible(hWnd: isize) -> i32;
+        pub fn SetForegroundWindow(hWnd: isize) -> i32;
+        pub fn ShowWindow(hWnd: isize, nCmdShow: i32) -> i32;
+        pub fn GetForegroundWindow() -> isize;
+        pub fn keybd_event(bVk: u8, bScan: u8, dwFlags: u32, dwExtraInfo: usize);
+    }
+    pub const SW_RESTORE: i32 = 9;
+    pub const KEYEVENTF_KEYUP: u32 = 0x0002;
+    pub const VK_CONTROL: u8 = 0x11;
+    pub const VK_V: u8 = 0x56;
+    pub const VK_RETURN: u8 = 0x0D;
+}
+
+fn relay_to_terminal(msg: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        // 1. Copy message to clipboard via PowerShell
+        let ps_cmd = format!(
+            "Set-Clipboard -Value '{}'",
+            msg.replace('\'', "''")
+        );
+        let _ = Command::new("powershell")
+            .args(["-NoProfile", "-Command", &ps_cmd])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+
+        // 2. Find Claude Code window by title
+        use std::sync::Mutex;
+        static FOUND_HWND: Mutex<Vec<isize>> = Mutex::new(Vec::new());
+
+        unsafe {
+            FOUND_HWND.lock().unwrap().clear();
+            extern "system" fn enum_callback(hwnd: isize, _lparam: isize) -> i32 {
+                unsafe {
+                    let len = winffi::GetWindowTextLengthW(hwnd);
+                    if len > 0 && winffi::IsWindowVisible(hwnd) != 0 {
+                        let mut buf = vec![0u16; (len + 1) as usize];
+                        winffi::GetWindowTextW(hwnd, buf.as_mut_ptr(), len + 1);
+                        let title = String::from_utf16_lossy(&buf);
+                        if title.to_lowercase().contains("claude") {
+                            FOUND_HWND.lock().unwrap().push(hwnd);
+                        }
+                    }
+                }
+                1 // continue enumeration
+            }
+            winffi::EnumWindows(enum_callback as *const () as isize, 0);
+        }
+
+        let hwnd = {
+            let found = FOUND_HWND.lock().unwrap();
+            found.first().copied()
+        };
+
+        if let Some(hwnd) = hwnd {
+            unsafe {
+                let prev = winffi::GetForegroundWindow();
+                winffi::ShowWindow(hwnd, winffi::SW_RESTORE);
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                winffi::SetForegroundWindow(hwnd);
+                std::thread::sleep(std::time::Duration::from_millis(50));
+
+                // Ctrl+V
+                winffi::keybd_event(winffi::VK_CONTROL, 0, 0, 0);
+                winffi::keybd_event(winffi::VK_V, 0, 0, 0);
+                winffi::keybd_event(winffi::VK_V, 0, winffi::KEYEVENTF_KEYUP, 0);
+                winffi::keybd_event(winffi::VK_CONTROL, 0, winffi::KEYEVENTF_KEYUP, 0);
+                std::thread::sleep(std::time::Duration::from_millis(30));
+
+                // Enter
+                winffi::keybd_event(winffi::VK_RETURN, 0, 0, 0);
+                winffi::keybd_event(winffi::VK_RETURN, 0, winffi::KEYEVENTF_KEYUP, 0);
+                std::thread::sleep(std::time::Duration::from_millis(30));
+
+                // Restore previous foreground window
+                if prev != hwnd {
+                    winffi::SetForegroundWindow(prev);
+                }
+            }
+        }
+    }
+}
+
+#[tauri::command]
+fn approve_permission() {
+    relay_to_terminal("y");
+}
+
+#[tauri::command]
+fn deny_permission() {
+    relay_to_terminal("n");
 }

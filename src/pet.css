@@ -104,3 +104,98 @@ html, body {
   0%, 100% { box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12); }
   50% { box-shadow: 0 2px 20px rgba(255, 100, 150, 0.3); }
 }
+
+/* ---- ask-bubble (permission confirm) ---- */
+
+#ask-bubble {
+  position: absolute;
+  bottom: 214px;
+  background: rgba(255, 240, 245, 0.95);
+  border: 1px solid rgba(255, 150, 180, 0.5);
+  border-radius: 12px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  color: #1e293b;
+  max-width: 220px;
+  text-align: center;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  white-space: nowrap;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  animation: gentle-pulse 2s ease-in-out infinite;
+}
+
+#ask-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 8px solid rgba(255, 240, 245, 0.95);
+}
+
+#ask-bubble.hidden {
+  opacity: 0;
+  transform: scale(0.9);
+  pointer-events: none;
+}
+
+#ask-bubble.visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+#ask-text {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+#ask-confirm-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+#ask-confirm-row.hidden {
+  display: none;
+}
+
+#ask-confirm-row button {
+  border: none;
+  border-radius: 8px;
+  padding: 4px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+#ask-confirm-row button:active {
+  transform: scale(0.92);
+}
+
+#ask-confirm-yes {
+  background: #22c55e;
+  color: white;
+}
+
+#ask-confirm-yes:hover {
+  background: #16a34a;
+}
+
+#ask-confirm-no {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+#ask-confirm-no:hover {
+  background: #fee2e2;
+  color: #ef4444;
+  border-color: #fca5a5;
+}
