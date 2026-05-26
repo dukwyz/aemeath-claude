@@ -13,13 +13,16 @@ import time
 import urllib.request
 import sys
 import os
+import subprocess
 
 PET_URL = "http://127.0.0.1:9527"
 CHECK_INTERVAL = 3  # seconds
+SLEEP_THRESHOLD = 8  # seconds — if gap > this, assume resume from sleep
 
 # Log file for debugging (pythonw has no console)
 LOG_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(LOG_DIR, "game_guard.log")
+PET_EXE = os.path.join(LOG_DIR, "aemeath-claude.exe")
 
 # System fullscreen windows to exclude
 SYSTEM_FULLSCREEN_TITLES = [
@@ -140,14 +143,49 @@ def pet_request(path):
     except Exception:
         return False
 
+def is_pet_running():
+    """Check if pet HTTP server is responsive."""
+    try:
+        req = urllib.request.Request(
+            "%s/api/heartbeat" % PET_URL,
+            method="GET",
+        )
+        urllib.request.urlopen(req, timeout=2)
+        return True
+    except Exception:
+        return False
+
+def ensure_pet_running():
+    """Start pet exe if not already running."""
+    if is_pet_running():
+        return
+    log("RESUME: pet not running, starting %s" % PET_EXE)
+    try:
+        subprocess.Popen(
+            [PET_EXE],
+            cwd=os.path.dirname(PET_EXE),
+            creationflags=getattr(subprocess, 'DETACHED_PROCESS', 0x00000008),
+        )
+    except Exception as e:
+        log("RESUME: failed to start pet: %s" % e)
+
 def main():
     was_hidden = False
+    last_check = time.time()
     log("STARTED pid=%d" % os.getpid())
     print("Game Guard started. Monitoring fullscreen windows...")
     print("Checking every %ds. Press Ctrl+C to stop." % CHECK_INTERVAL)
 
     while True:
         try:
+            # Sleep resume detection: if gap > threshold, we likely woke from sleep
+            now = time.time()
+            gap = now - last_check
+            if gap > SLEEP_THRESHOLD:
+                log("RESUME: detected sleep gap of %ds" % int(gap))
+                ensure_pet_running()
+            last_check = now
+
             info = get_foreground_window_info()
             if info:
                 is_fs = info["is_fullscreen"]
