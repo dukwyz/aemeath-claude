@@ -19,3 +19,15 @@
 ## Hook 脚本找不到文件
 
 使用 `$CLAUDE_PROJECT_DIR` 环境变量：`cd "$CLAUDE_PROJECT_DIR" && python ".claude/scripts/..."`
+
+## 游戏隐身不生效
+
+检查 `game_guard.py` 是否在运行：`Get-Process -Name 'python*'`。
+
+如果不在运行，查看日志：`cat .claude/aemeath/game_guard.log`。
+
+**已知问题**：`Start-Process python` 在某些环境下会导致进程立即退出。解决方案：使用 `pythonw.exe` + `&` 调用：
+
+```powershell
+& 'C:\Python314\pythonw.exe' 'D:/path/to/.claude/aemeath/game_guard.py'
+```

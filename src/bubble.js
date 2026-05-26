@@ -3,6 +3,7 @@ class Bubble {
     this.el = el;
     this.queue = [];
     this.displayTimer = null;
+    this.fadeTimer = null;
     this.displayMs = 4000;
     this.isPersistent = false;
   }
@@ -13,14 +14,17 @@ class Bubble {
       return;
     }
 
-    this.isPersistent = false;
-    this.el.classList.remove('persistent');
+    // If transitioning from persistent to non-persistent, clear queue first
+    if (this.isPersistent) {
+      this.isPersistent = false;
+      this.el.classList.remove('persistent');
+      this.queue = [];
+    }
 
-    // If bubble is already visible and not persistent, enqueue
+    // If bubble is already visible and not in fade-out, enqueue
     if (
       !this.el.classList.contains('hidden') &&
-      !this.el.classList.contains('fade-out') &&
-      !this.isPersistent
+      !this.el.classList.contains('fade-out')
     ) {
       this.queue.push(text);
       return;
@@ -35,6 +39,13 @@ class Bubble {
       return;
     }
 
+    // Clear any pending fade timers and queue when going persistent
+    if (this.fadeTimer) {
+      clearTimeout(this.fadeTimer);
+      this.fadeTimer = null;
+    }
+    this.queue = [];
+
     this.isPersistent = true;
     this.el.classList.add('persistent');
     this._display(text, true);
@@ -46,13 +57,15 @@ class Bubble {
     this.el.classList.add('visible');
 
     if (this.displayTimer) clearTimeout(this.displayTimer);
+    if (this.fadeTimer) clearTimeout(this.fadeTimer);
 
     if (!persistent) {
       this.displayTimer = setTimeout(() => {
         this.el.classList.add('fade-out');
-        setTimeout(() => {
+        this.fadeTimer = setTimeout(() => {
           this.el.classList.add('hidden');
           this.el.classList.remove('visible', 'fade-out');
+          this.fadeTimer = null;
           if (this.queue.length > 0) {
             const next = this.queue.shift();
             this._display(next, false);
@@ -72,6 +85,10 @@ class Bubble {
     if (this.displayTimer) {
       clearTimeout(this.displayTimer);
       this.displayTimer = null;
+    }
+    if (this.fadeTimer) {
+      clearTimeout(this.fadeTimer);
+      this.fadeTimer = null;
     }
   }
 }

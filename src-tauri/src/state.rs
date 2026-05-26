@@ -81,7 +81,7 @@ impl PetState {
             PetState::Failed => "failed",
             PetState::Waving => "waving",
             PetState::Jumping => "jumping",
-            PetState::Chatting => "chatting",
+            PetState::Chatting => "waiting",
             PetState::Fetching => "fetching",
             PetState::Searching => "searching",
             PetState::Analyzing => "analyzing",

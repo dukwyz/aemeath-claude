@@ -246,19 +246,19 @@ function schedulePermissionRecovery() {
 
 function scheduleIdleAnim() {
   if (timerManager._timers.has('idleAnim')) return;
-  setNamedTimeout('idleAnim', doIdleAnim, 15000 + Math.random() * 30000);
+  setNamedTimeout('idleAnim', doIdleAnim, 20000 + Math.random() * 40000);
 }
 function doIdleAnim() {
   if (!idleStart) return;
   idleAnimActive = true;
-  const pick = ['jumping','waving','chatting'][Math.floor(Math.random()*3)];
+  const pick = ['jumping','waving'][Math.floor(Math.random()*2)];
   window._petAnimator.play(pick);
   setNamedTimeout('idleAnimReturn', () => {
     idleAnimActive = false;
     if (!idleStart) return; // 已离开 idle，不再回退
     if (window._petAnimator) window._petAnimator.play('idle');
     scheduleIdleAnim();
-  }, 2000);
+  }, 3000);
 }
 function cancelIdleAnim() {
   idleAnimActive = false;
