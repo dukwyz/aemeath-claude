@@ -203,6 +203,14 @@ async fn set_pet_state(app: &AppState, state: PetState, tool: Option<String>) {
         return;
     }
 
+    // Protect Permission state: don't let other hooks override it while waiting for user input.
+    // Only a new permission hook or the permission resolution can change this state.
+    if matches!(mgr.current_state(), PetState::Permission)
+        && !matches!(state, PetState::Permission)
+    {
+        return;
+    }
+
     // Protect tool bubble minimum display time (all active states)
     let is_active = matches!(mgr.current_state(),
         PetState::Running | PetState::Chatting | PetState::Fetching

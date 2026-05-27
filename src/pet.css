@@ -108,8 +108,10 @@ html, body {
 /* ---- ask-bubble (permission confirm / MCP overlay) ---- */
 
 #ask-bubble {
-  position: absolute;
-  bottom: 214px;
+  position: fixed;
+  bottom: 48px;
+  left: 50%;
+  transform: translateX(-50%);
   background: rgba(255, 255, 255, 0.92);
   border-radius: 12px;
   padding: 8px 14px;
@@ -137,13 +139,13 @@ html, body {
 
 #ask-bubble.hidden {
   opacity: 0;
-  transform: scale(0.9);
+  transform: translateX(-50%) scale(0.9);
   pointer-events: none;
 }
 
 #ask-bubble.visible {
   opacity: 1;
-  transform: scale(1);
+  transform: translateX(-50%) scale(1);
   pointer-events: auto;
 }
 

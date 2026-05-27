@@ -7,13 +7,20 @@ mod tray;
 
 use state::StateManager;
 use state::StateChangeEvent;
+use state::PetState;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, State};
 
 #[derive(Clone, serde::Serialize)]
 struct VisibilityEvent {
     visible: bool,
+}
+
+// Shared state accessible from Tauri commands
+struct TauriAppState {
+    state: Arc<Mutex<state::StateManager>>,
+    tx: broadcast::Sender<state::StateChangeEvent>,
 }
 
 #[tokio::main]
@@ -51,7 +58,13 @@ async fn main() {
     });
 
     // Build Tauri app
+    let tauri_state = TauriAppState {
+        state: state_manager.clone(),
+        tx: tx.clone(),
+    };
+
     tauri::Builder::default()
+        .manage(tauri_state)
         .invoke_handler(tauri::generate_handler![start_drag, open_obsidian, approve_permission, deny_permission])
         .setup(move |app| {
             // Listen to broadcast channel, forward state changes to frontend
@@ -214,13 +227,37 @@ fn relay_to_terminal(msg: &str) {
 }
 
 #[tauri::command]
-fn approve_permission() {
+async fn approve_permission(app_state: State<'_, TauriAppState>) -> Result<(), String> {
     // Claude Code 权限菜单：输入 3 选择 "Always allow"
     relay_to_terminal("3");
+    // Clear Permission state so subsequent hooks can proceed
+    clear_permission_state(&app_state).await;
+    Ok(())
 }
 
 #[tauri::command]
-fn deny_permission() {
+async fn deny_permission(app_state: State<'_, TauriAppState>) -> Result<(), String> {
     // Claude Code 权限菜单：输入 1 选择 "Deny"
     relay_to_terminal("1");
+    // Clear Permission state so subsequent hooks can proceed
+    clear_permission_state(&app_state).await;
+    Ok(())
+}
+
+async fn clear_permission_state(app_state: &TauriAppState) {
+    let mut mgr = app_state.state.lock().await;
+    if matches!(mgr.current_state(), PetState::Permission) {
+        mgr.set_state(PetState::Idle, None);
+    }
+    let animation = mgr.current_animation_name();
+    let bubble = mgr.current_state().bubble_text(None).to_string();
+    drop(mgr);
+
+    let _ = app_state.tx.send(StateChangeEvent {
+        animation,
+        bubble,
+        overlay: None,
+        input_type: None,
+        options: None,
+    });
 }
