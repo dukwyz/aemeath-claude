@@ -22,13 +22,17 @@ async fn main() {
     let (tx, _rx) = broadcast::channel::<StateChangeEvent>(32);
     let (vis_tx, _vis_rx) = broadcast::channel::<VisibilityEvent>(4);
 
+    // Shared pending input slot for MCP oneshot channel
+    let pending_input: state::SharedPendingInput = Arc::new(Mutex::new(None));
+
     let sm_http = state_manager.clone();
     let tx_http = tx.clone();
     let vis_tx_http = vis_tx.clone();
+    let pending_http = pending_input.clone();
 
     // Spawn HTTP server on :9527
     tokio::spawn(async move {
-        let app = http::create_router(sm_http, tx_http, vis_tx_http);
+        let app = http::create_router(sm_http, tx_http, vis_tx_http, pending_http);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:9527").await.unwrap();
         println!("HTTP server listening on http://127.0.0.1:9527");
         axum::serve(listener, app).await.unwrap();
@@ -36,10 +40,11 @@ async fn main() {
 
     let sm_mcp = state_manager.clone();
     let tx_mcp = tx.clone();
+    let pending_mcp = pending_input.clone();
 
     // Spawn MCP server on :9528
     tokio::spawn(async move {
-        let app = mcp::create_mcp_router(sm_mcp, tx_mcp);
+        let app = mcp::create_mcp_router(sm_mcp, tx_mcp, pending_mcp);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:9528").await.unwrap();
         println!("MCP server listening on http://127.0.0.1:9528");
         axum::serve(listener, app).await.unwrap();
@@ -80,6 +85,9 @@ async fn main() {
                 StateChangeEvent {
                     animation: "waving".to_string(),
                     bubble: "爱弥斯已上线~".to_string(),
+                    overlay: None,
+                    input_type: None,
+                    options: None,
                 },
             );
 
@@ -207,10 +215,12 @@ fn relay_to_terminal(msg: &str) {
 
 #[tauri::command]
 fn approve_permission() {
-    relay_to_terminal("y");
+    // Claude Code 权限菜单：输入 3 选择 "Always allow"
+    relay_to_terminal("3");
 }
 
 #[tauri::command]
 fn deny_permission() {
-    relay_to_terminal("n");
+    // Claude Code 权限菜单：输入 1 选择 "Deny"
+    relay_to_terminal("1");
 }

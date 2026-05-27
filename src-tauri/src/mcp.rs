@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 
-use crate::state::StateChangeEvent;
+use crate::state::{PendingInput, SharedPendingInput, StateChangeEvent};
 
 pub type McpState = Arc<Mutex<crate::state::StateManager>>;
 
@@ -32,17 +32,22 @@ struct JsonRpcResponse {
     error: Option<Value>,
 }
 
-pub fn create_mcp_router(state: McpState, tx: broadcast::Sender<StateChangeEvent>) -> Router {
+pub fn create_mcp_router(
+    state: McpState,
+    tx: broadcast::Sender<StateChangeEvent>,
+    pending: SharedPendingInput,
+) -> Router {
     Router::new()
         .route("/mcp", post(handle_mcp_request))
         .route("/sse", get(handle_sse))
-        .with_state(McpAppState { state, tx })
+        .with_state(McpAppState { state, tx, pending })
 }
 
 #[derive(Clone)]
 struct McpAppState {
     state: McpState,
     tx: broadcast::Sender<StateChangeEvent>,
+    pending: SharedPendingInput,
 }
 
 async fn handle_mcp_request(
@@ -101,6 +106,23 @@ async fn handle_mcp_request(
                         },
                         "required": ["state"]
                     }
+                },
+                {
+                    "name": "aemeath_get_user_input",
+                    "description": "Get user input through the pet UI. Supports confirm (yes/no), select (choose from options), and text (free-form input).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "type": { "type": "string", "enum": ["confirm", "select", "text"], "description": "Type of input to request" },
+                            "question": { "type": "string", "description": "Question or prompt to show the user" },
+                            "options": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "Options for select type"
+                            }
+                        },
+                        "required": ["type", "question"]
+                    }
                 }
             ]
         }),
@@ -116,26 +138,119 @@ async fn handle_mcp_request(
                     let _ = app.tx.send(StateChangeEvent {
                         animation: "waiting".into(),
                         bubble: msg.to_string(),
+                        overlay: None,
+                        input_type: None,
+                        options: None,
                     });
                     json!({ "content": [{ "type": "text", "text": format!("Message shown: {}", msg) }] })
                 }
                 "aemeath_ask" => {
                     let question = args["question"].as_str().unwrap_or("");
-                    let _options: Vec<String> = args["options"]
+                    let options: Vec<String> = args["options"]
                         .as_array()
                         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                         .unwrap_or_default();
+
+                    // Create oneshot channel
+                    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+
+                    // Store pending input
+                    {
+                        let mut slot = app.pending.lock().await;
+                        *slot = Some((
+                            PendingInput {
+                                input_type: "confirm".to_string(),
+                                question: question.to_string(),
+                                options: options.clone(),
+                                created_at: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_millis() as u64,
+                            },
+                            tx,
+                        ));
+                    }
+
+                    // Send overlay event so frontend shows interactive UI
                     let _ = app.tx.send(StateChangeEvent {
                         animation: "waving".into(),
-                        bubble: question.to_string(),
+                        bubble: String::new(),
+                        overlay: Some("input".into()),
+                        input_type: Some("confirm".into()),
+                        options: Some(options),
                     });
-                    json!({ "content": [{ "type": "text", "text": "User dismissed" }] })
+
+                    // Block with 300s timeout
+                    match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
+                        Ok(Ok(answer)) => {
+                            json!({ "content": [{ "type": "text", "text": answer }] })
+                        }
+                        _ => {
+                            // Timeout or channel closed — clear slot
+                            let mut slot = app.pending.lock().await;
+                            *slot = None;
+                            json!({ "content": [{ "type": "text", "text": "User dismissed" }] })
+                        }
+                    }
+                }
+                "aemeath_get_user_input" => {
+                    let input_type = args["type"].as_str().unwrap_or("confirm");
+                    let question = args["question"].as_str().unwrap_or("");
+                    let options: Vec<String> = args["options"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                        .unwrap_or_default();
+
+                    // Create oneshot channel
+                    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+
+                    // Store pending input
+                    {
+                        let mut slot = app.pending.lock().await;
+                        *slot = Some((
+                            PendingInput {
+                                input_type: input_type.to_string(),
+                                question: question.to_string(),
+                                options: options.clone(),
+                                created_at: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_millis() as u64,
+                            },
+                            tx,
+                        ));
+                    }
+
+                    // Send overlay event so frontend shows interactive UI
+                    let _ = app.tx.send(StateChangeEvent {
+                        animation: "waving".into(),
+                        bubble: String::new(),
+                        overlay: Some("input".into()),
+                        input_type: Some(input_type.to_string()),
+                        options: Some(options),
+                    });
+
+                    // Block with 300s timeout
+                    match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
+                        Ok(Ok(answer)) => {
+                            json!({ "content": [{ "type": "text", "text": answer }] })
+                        }
+                        _ => {
+                            // Timeout or channel closed — clear slot
+                            let mut slot = app.pending.lock().await;
+                            *slot = None;
+                            json!({ "content": [{ "type": "text", "text": "User dismissed" }] })
+                        }
+                    }
                 }
                 "aemeath_play" => {
                     let state_name = args["state"].as_str().unwrap_or("idle");
                     let _ = app.tx.send(StateChangeEvent {
                         animation: state_name.to_string(),
                         bubble: "".into(),
+                        overlay: None,
+                        input_type: None,
+                        options: None,
                     });
                     json!({ "content": [{ "type": "text", "text": format!("Playing: {}", state_name) }] })
                 }

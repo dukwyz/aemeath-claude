@@ -108,21 +108,21 @@ html, body {
 /* ---- ask-bubble (permission confirm) ---- */
 
 #ask-bubble {
-  position: absolute;
-  bottom: 214px;
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
   background: rgba(255, 240, 245, 0.95);
   border: 1px solid rgba(255, 150, 180, 0.5);
-  border-radius: 12px;
-  padding: 8px 14px;
+  border-radius: 50px;
+  padding: 6px 16px 8px;
   font-size: 13px;
   font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
   color: #1e293b;
-  max-width: 220px;
   text-align: center;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
-  white-space: nowrap;
-  transition: opacity 0.15s ease, transform 0.15s ease;
   animation: gentle-pulse 2s ease-in-out infinite;
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
 #ask-bubble::after {
@@ -140,24 +140,126 @@ html, body {
 
 #ask-bubble.hidden {
   opacity: 0;
-  transform: scale(0.9);
+  transform: translateX(-50%) scale(0.9);
   pointer-events: none;
 }
 
 #ask-bubble.visible {
   opacity: 1;
-  transform: scale(1);
+  transform: translateX(-50%) scale(1);
+  pointer-events: auto;
 }
 
-#ask-text {
+#ask-prompt {
   margin-bottom: 6px;
   font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#ask-input-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+#ask-input-row.hidden {
+  display: none;
+}
+
+#ask-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 140px;
+  padding: 3px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  outline: none;
+}
+
+#ask-input:focus {
+  border-color: #93c5fd;
+}
+
+#ask-send, #ask-back {
+  border: none;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+#ask-send:active, #ask-back:active {
+  transform: scale(0.92);
+}
+
+#ask-send {
+  background: #22c55e;
+  color: white;
+}
+
+#ask-send:hover {
+  background: #16a34a;
+}
+
+#ask-back {
+  background: #f1f5f9;
   color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+#ask-back:hover {
+  background: #fee2e2;
+  color: #ef4444;
+  border-color: #fca5a5;
+}
+
+#ask-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  max-width: 180px;
+}
+
+#ask-choices.hidden {
+  display: none;
+}
+
+.ask-choice-btn {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  background: white;
+  color: #1e293b;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+  text-align: center;
+}
+
+.ask-choice-btn:hover {
+  background: #f0f9ff;
+  border-color: #93c5fd;
+}
+
+.ask-choice-btn:active {
+  transform: scale(0.96);
 }
 
 #ask-confirm-row {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   justify-content: center;
 }
 
@@ -167,9 +269,9 @@ html, body {
 
 #ask-confirm-row button {
   border: none;
-  border-radius: 8px;
-  padding: 4px 14px;
-  font-size: 13px;
+  border-radius: 6px;
+  padding: 3px 12px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, transform 0.1s ease;

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PetState {
@@ -38,9 +38,24 @@ pub struct StateRecord {
 pub struct StateChangeEvent {
     pub animation: String,
     pub bubble: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<String>,      // "input" | "permission" | None
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_type: Option<String>,   // "confirm" | "text" | "select"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<String>>,
 }
 
 pub type SharedState = Arc<Mutex<StateManager>>;
+
+pub struct PendingInput {
+    pub input_type: String,   // "confirm" | "select" | "text"
+    pub question: String,
+    pub options: Vec<String>,
+    pub created_at: u64,
+}
+
+pub type SharedPendingInput = Arc<Mutex<Option<(PendingInput, oneshot::Sender<String>)>>>;
 
 pub struct StateManager {
     current: PetState,

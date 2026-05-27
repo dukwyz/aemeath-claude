@@ -96,11 +96,11 @@ class Bubble {
 
   showConfirm(text) {
     const askBubble = document.getElementById('ask-bubble');
-    const askText = document.getElementById('ask-text');
+    const askPrompt = document.getElementById('ask-prompt');
     const askRow = document.getElementById('ask-confirm-row');
-    if (!askBubble || !askText || !askRow) return;
+    if (!askBubble || !askPrompt || !askRow) return;
 
-    askText.textContent = text || '等待指示...';
+    askPrompt.textContent = text || '等待指示...';
     askRow.classList.remove('hidden');
     askBubble.classList.remove('hidden');
     askBubble.classList.add('visible');
@@ -114,9 +114,81 @@ class Bubble {
     const askRow = document.getElementById('ask-confirm-row');
     if (!askBubble) return;
 
+    // 立即隐藏，display:none 无残影
     askBubble.classList.remove('visible');
     askBubble.classList.add('hidden');
     if (askRow) askRow.classList.add('hidden');
+  }
+
+  // ---- interactive input (MCP oneshot: confirm / text / select) ----
+
+  showInteractive(prompt, inputType, options) {
+    const askBubble = document.getElementById('ask-bubble');
+    const askPrompt = document.getElementById('ask-prompt');
+    const confirmRow = document.getElementById('ask-confirm-row');
+    const inputRow = document.getElementById('ask-input-row');
+    const choicesDiv = document.getElementById('ask-choices');
+    if (!askBubble) return;
+
+    // Hide regular bubble and any lingering permission confirm
+    this.hide();
+    this.hideConfirm();
+
+    // Hide all sub-areas first
+    if (confirmRow) confirmRow.classList.add('hidden');
+    if (inputRow) inputRow.classList.add('hidden');
+    if (choicesDiv) { choicesDiv.innerHTML = ''; choicesDiv.classList.add('hidden'); }
+
+    // Set prompt
+    if (askPrompt) {
+      askPrompt.textContent = prompt || '';
+    }
+
+    // Show the right UI based on inputType
+    switch (inputType) {
+      case 'confirm':
+        if (confirmRow) confirmRow.classList.remove('hidden');
+        break;
+      case 'text':
+        if (inputRow) inputRow.classList.remove('hidden');
+        const inputEl = document.getElementById('ask-input');
+        if (inputEl) {
+          inputEl.value = '';
+          setTimeout(() => inputEl.focus(), 50);
+        }
+        break;
+      case 'select':
+        if (choicesDiv && options && options.length > 0) {
+          choicesDiv.classList.remove('hidden');
+          options.forEach((opt, i) => {
+            const btn = document.createElement('button');
+            btn.className = 'ask-choice-btn';
+            btn.textContent = opt;
+            btn.dataset.value = opt;
+            btn.dataset.index = String(i);
+            choicesDiv.appendChild(btn);
+          });
+        }
+        break;
+    }
+
+    // Show the bubble
+    askBubble.classList.remove('hidden');
+    askBubble.classList.add('visible');
+  }
+
+  hideInteractive() {
+    const askBubble = document.getElementById('ask-bubble');
+    const confirmRow = document.getElementById('ask-confirm-row');
+    const inputRow = document.getElementById('ask-input-row');
+    const choicesDiv = document.getElementById('ask-choices');
+
+    if (!askBubble) return;
+    askBubble.classList.remove('visible');
+    askBubble.classList.add('hidden');
+    if (confirmRow) confirmRow.classList.add('hidden');
+    if (inputRow) inputRow.classList.add('hidden');
+    if (choicesDiv) { choicesDiv.innerHTML = ''; choicesDiv.classList.add('hidden'); }
   }
 }
 

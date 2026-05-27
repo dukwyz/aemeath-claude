@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
 
-use crate::state::{PetState, SharedState, StateChangeEvent};
+use crate::state::{PetState, SharedPendingInput, SharedState, StateChangeEvent};
 
 #[derive(Debug, Deserialize)]
 pub struct StateRequest {
@@ -22,12 +22,21 @@ pub struct StateRequest {
 pub struct CurrentResponse {
     pub animation: String,
     pub bubble: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub question: Option<String>,
 }
 
 pub fn create_router(
     state: SharedState,
     tx: broadcast::Sender<StateChangeEvent>,
     vis_tx: broadcast::Sender<super::VisibilityEvent>,
+    pending: SharedPendingInput,
 ) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -45,8 +54,10 @@ pub fn create_router(
         .route("/api/hook/permission", post(handle_hook_permission))
         .route("/api/hide", post(handle_hide))
         .route("/api/show", post(handle_show))
+        .route("/api/user/pending", get(handle_user_pending))
+        .route("/api/user/input", post(handle_user_input))
         .layer(cors)
-        .with_state(AppState { state, tx, vis_tx })
+        .with_state(AppState { state, tx, vis_tx, pending })
 }
 
 #[derive(Clone)]
@@ -54,6 +65,7 @@ struct AppState {
     state: SharedState,
     tx: broadcast::Sender<StateChangeEvent>,
     vis_tx: broadcast::Sender<super::VisibilityEvent>,
+    pending: SharedPendingInput,
 }
 
 async fn handle_state(
@@ -74,7 +86,13 @@ async fn handle_state(
     let bubble = mgr.current_state().bubble_text(mgr.current_tool()).to_string();
     drop(mgr);
 
-    let _ = app.tx.send(StateChangeEvent { animation, bubble });
+    let _ = app.tx.send(StateChangeEvent {
+        animation,
+        bubble,
+        overlay: None,
+        input_type: None,
+        options: None,
+    });
     StatusCode::OK
 }
 
@@ -89,7 +107,21 @@ async fn handle_current(
     let tool = mgr.current_tool();
     let animation = mgr.current_animation_name();
     let bubble = mgr.current_state().bubble_text(tool).to_string();
-    Json(CurrentResponse { animation, bubble })
+    drop(mgr);
+
+    // Include pending input state so frontend can drive overlay
+    let pending = app.pending.lock().await;
+    let (overlay, input_type, options, question) = match pending.as_ref() {
+        Some((p, _)) => (
+            Some("input".to_string()),
+            Some(p.input_type.clone()),
+            Some(p.options.clone()),
+            Some(p.question.clone()),
+        ),
+        None => (None, None, None, None),
+    };
+
+    Json(CurrentResponse { animation, bubble, overlay, input_type, options, question })
 }
 
 async fn handle_hook_thinking(
@@ -156,6 +188,9 @@ async fn handle_hook_permission(
     let _ = app.tx.send(StateChangeEvent {
         animation: "waving".to_string(),
         bubble: "等待指示...".to_string(),
+        overlay: None,
+        input_type: None,
+        options: None,
     });
     StatusCode::OK
 }
@@ -186,7 +221,13 @@ async fn set_pet_state(app: &AppState, state: PetState, tool: Option<String>) {
     let bubble = mgr.current_state().bubble_text(tool.as_deref()).to_string();
     drop(mgr);
 
-    let _ = app.tx.send(StateChangeEvent { animation, bubble });
+    let _ = app.tx.send(StateChangeEvent {
+        animation,
+        bubble,
+        overlay: None,
+        input_type: None,
+        options: None,
+    });
 }
 
 async fn handle_hide(
@@ -209,4 +250,59 @@ async fn handle_show(
     }
     let _ = app.vis_tx.send(super::VisibilityEvent { visible: true });
     StatusCode::OK
+}
+
+// ---- Pending Input endpoints (oneshot channel) ----
+
+#[derive(Serialize)]
+pub struct PendingResponse {
+    pub has_pending: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub question: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<String>>,
+}
+
+async fn handle_user_pending(
+    State(app): State<AppState>,
+) -> Json<PendingResponse> {
+    let slot = app.pending.lock().await;
+    match slot.as_ref() {
+        Some((pending, _)) => Json(PendingResponse {
+            has_pending: true,
+            input_type: Some(pending.input_type.clone()),
+            question: Some(pending.question.clone()),
+            options: Some(pending.options.clone()),
+        }),
+        None => Json(PendingResponse {
+            has_pending: false,
+            input_type: None,
+            question: None,
+            options: None,
+        }),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UserInputRequest {
+    pub answer: String,
+}
+
+async fn handle_user_input(
+    State(app): State<AppState>,
+    Json(body): Json<UserInputRequest>,
+) -> StatusCode {
+    let sender = {
+        let mut slot = app.pending.lock().await;
+        slot.take().map(|(_, sender)| sender)
+    };
+    match sender {
+        Some(tx) => {
+            let _ = tx.send(body.answer);
+            StatusCode::OK
+        }
+        None => StatusCode::CONFLICT, // 409: no pending input to answer
+    }
 }

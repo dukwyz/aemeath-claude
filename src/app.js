@@ -4,7 +4,12 @@ let lastBubble = '';
 let toolLockUntil = 0;
 let idleStart = 0;
 let permissionPending = false;
+let permissionResolvedAt = 0;  // 防止点击后立刻重新触发
+let confirmShownAt = 0;  // 按钮最少显示 3 秒
 let idleAnimActive = false;
+let overlayActive = false;    // MCP overlay 显示中
+let overlayType = '';         // "confirm" | "select" | "text"
+let lastAnimSwitchAt = 0;     // 动画防抖：距上次切换的时间戳
 
 // Timer manager to prevent leaks
 const timerManager = {
@@ -78,6 +83,8 @@ async function init() {
   let clickTimer = null;
   document.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
+    // Ask-bubble 内的点击不触发拖拽/双击逻辑
+    if (e.target.closest('#ask-bubble')) return;
     const now = Date.now();
     if (now - lastClickTime < 200) {
       // 双击：打开 Obsidian
@@ -94,28 +101,116 @@ async function init() {
     }
   });
   setupConfirmButtons();
+  setupInteractiveInputs();
+  // 拦截 ask-bubble 上所有 mousedown，阻止冒泡到 document 触发拖拽
+  const askBubble = document.getElementById('ask-bubble');
+  if (askBubble) {
+    askBubble.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+    });  // bubbling phase，在按钮 handler 之后拦截
+  }
   pollState();
+  pollPendingInput();
 }
 
-function setupConfirmButtons() {
+// ---- Interactive input handlers (MCP overlay) ----
+
+function setupInteractiveInputs() {
   const ipc = window.__TAURI_INTERNALS__;
+
+  // Yes / No buttons (permission mode)
   const btnYes = document.getElementById('ask-confirm-yes');
   const btnNo = document.getElementById('ask-confirm-no');
   if (btnYes) {
-    btnYes.addEventListener('click', (e) => {
+    btnYes.addEventListener('mousedown', (e) => {
       e.stopPropagation();
-      try { if (ipc && ipc.invoke) ipc.invoke('approve_permission'); } catch (_) {}
-      exitPermission();
-      if (window._petBubble) window._petBubble.hideConfirm();
+      e.preventDefault();
+      if (overlayActive) {
+        submitInteractive('yes');
+      } else {
+        try { if (ipc && ipc.invoke) ipc.invoke('approve_permission'); } catch (_) {}
+        exitPermission();
+        window._petBubble.hideConfirm();
+      }
     });
   }
   if (btnNo) {
-    btnNo.addEventListener('click', (e) => {
+    btnNo.addEventListener('mousedown', (e) => {
       e.stopPropagation();
-      try { if (ipc && ipc.invoke) ipc.invoke('deny_permission'); } catch (_) {}
-      exitPermission();
-      if (window._petBubble) window._petBubble.hideConfirm();
+      e.preventDefault();
+      if (overlayActive) {
+        submitInteractive('no');
+      } else {
+        try { if (ipc && ipc.invoke) ipc.invoke('deny_permission'); } catch (_) {}
+        exitPermission();
+        window._petBubble.hideConfirm();
+      }
     });
+  }
+
+  // Send / Back buttons (text input)
+  const btnSend = document.getElementById('ask-send');
+  const btnBack = document.getElementById('ask-back');
+  if (btnSend) {
+    btnSend.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (overlayActive) {
+        const input = document.getElementById('ask-input');
+        submitInteractive((input && input.value) || '');
+      }
+    });
+  }
+  if (btnBack) {
+    btnBack.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      submitInteractive('dismiss');
+    });
+  }
+
+  // Enter key on text input
+  const askInput = document.getElementById('ask-input');
+  if (askInput) {
+    askInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (overlayActive) submitInteractive(askInput.value || '');
+      }
+    });
+  }
+}
+
+async function submitInteractive(answer) {
+  overlayActive = false;  // 乐观：立即标记，防止重新触发
+  overlayType = '';
+  if (window._petBubble) window._petBubble.hideConfirm();
+  exitPermission();
+  await submitPendingInput(answer);  // 确保后端收到再返回
+}
+
+function setupConfirmButtons() {
+  // Button handlers are now in setupInteractiveInputs()
+}
+
+// ---- MCP oneshot pending input ----
+
+async function submitPendingInput(answer) {
+  try {
+    await fetch('http://127.0.0.1:9527/api/user/input', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer }),
+    });
+  } catch (_) {}
+}
+
+async function pollPendingInput() {
+  // Overlay UI is entirely driven by pollState via the overlay field.
+  // This loop is kept only as a safety net for edge cases where
+  // pollState misses a timeout. It does NOT manage overlayActive.
+  while (true) {
+    await new Promise(r => setTimeout(r, 2000));
   }
 }
 
@@ -157,20 +252,56 @@ async function pollState() {
       const r = await fetch('http://127.0.0.1:9527/api/current');
       if (r.ok) {
         const data = await r.json();
-        if (data.animation) {
-          // 空闲动画播放中，跳过 idle → idle 的覆盖（但非 idle 状态仍正常切换）
-          if (!(idleAnimActive && data.animation === 'idle')) {
-            window._petAnimator.play(data.animation);
+
+        // Overlay check FIRST — skip all bubble logic when overlay is active
+        if (data.overlay === 'input') {
+          if (!overlayActive) {
+            overlayActive = true;
+            overlayType = data.input_type || 'confirm';
+            // 用 showConfirm，跟权限气泡完全一致
+            if (window._petBubble) {
+              window._petBubble.showConfirm(data.question || '确认？');
+            }
           }
+          // Always keep regular bubble hidden during overlay
+          if (window._petBubble) window._petBubble.hide();
+          await new Promise(r => setTimeout(r, 200));
+          continue;
+        }
+        // No overlay: hide if was showing
+        if (overlayActive) {
+          overlayActive = false;
+          overlayType = '';
+          if (window._petBubble) window._petBubble.hideConfirm();
+        }
+
+        if (data.animation) {
+          // 动画防抖：非 idle 状态切换间隔 < 800ms 时跳过，防止抽搐
+          const now = Date.now();
+          const isIdleAnim = idleAnimActive && data.animation === 'idle';
+          const tooFast = data.animation !== 'idle' && (now - lastAnimSwitchAt) < 800;
+          if (!isIdleAnim && !tooFast) {
+            window._petAnimator.play(data.animation);
+            lastAnimSwitchAt = now;
+            if (data.animation !== 'idle') {
+              cancelIdleAnim();
+            }
+          }
+
           // Approve/new message: clear permission on non-waving, non-idle
+          // 但按钮最少显示 3 秒，防止状态切换太快把按钮清掉
           if (permissionPending && data.animation !== 'waving' && data.animation !== 'idle') {
-            exitPermission();
-            window._petBubble.hide();
+            if (Date.now() - confirmShownAt > 3000) {
+              exitPermission();
+              window._petBubble.hide();
+            }
           }
           // ESC/deny → idle: clear permission silently
           if (permissionPending && data.animation === 'idle') {
-            exitPermission();
-            window._petBubble.hide();
+            if (Date.now() - confirmShownAt > 3000) {
+              exitPermission();
+              window._petBubble.hide();
+            }
           }
           // Idle animation + reminders
           if (data.animation === 'idle') {
@@ -191,9 +322,14 @@ async function pollState() {
         }
         if (data.bubble && data.bubble !== lastBubble) {
           const now = Date.now();
-          if (data.bubble.includes('等待指示')) {
-            if (!permissionPending) {
+          // Skip permission bubble while MCP overlay is active
+          if (data.bubble.includes('等待指示') && !overlayActive) {
+              // 隐藏普通气泡，只显示权限气泡
+              if (window._petBubble) window._petBubble.hide();
+            // 点击按钮后 2 秒内不重新触发 permission 模式
+            if (!permissionPending && Date.now() - permissionResolvedAt > 2000) {
               permissionPending = true;
+              confirmShownAt = Date.now();
               setNamedInterval('permissionRepeat', () => {
                 if (permissionPending && window._petBubble) {
                   window._petBubble.showConfirm('等待指示...');
@@ -203,7 +339,10 @@ async function pollState() {
               schedulePermissionRecovery();
             }
             lastBubble = data.bubble;
-            window._petBubble.showConfirm(data.bubble);
+            // 只在 permissionPending 为 true 时显示按钮
+            if (permissionPending) {
+              window._petBubble.showConfirm(data.bubble);
+            }
           } else if (permissionPending) {
             if (isToolBubble(data.bubble)) {
               exitPermission();
@@ -229,12 +368,13 @@ async function pollState() {
         }
       }
     } catch (_) {}
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise(r => setTimeout(r, 200));
   }
 }
 
 function exitPermission() {
   permissionPending = false;
+  permissionResolvedAt = Date.now();  // 2秒内不重新触发
   lastBubble = '';  // 重置，让下一次 poll 能正确刷新气泡
   clearNamedTimer('permissionRepeat');
   clearNamedTimer('permissionFade');
