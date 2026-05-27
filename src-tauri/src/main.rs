@@ -246,6 +246,9 @@ async fn deny_permission(app_state: State<'_, TauriAppState>) -> Result<(), Stri
 
 async fn clear_permission_state(app_state: &TauriAppState) {
     let mut mgr = app_state.state.lock().await;
+    if mgr.is_force_hidden() {
+        return;
+    }
     if matches!(mgr.current_state(), PetState::Permission) {
         mgr.set_state(PetState::Idle, None);
     }

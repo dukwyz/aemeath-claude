@@ -183,6 +183,10 @@ async fn handle_hook_permission(
 ) -> StatusCode {
     {
         let mut mgr = app.state.lock().await;
+        // Skip permission while pet is hidden (fullscreen)
+        if mgr.is_force_hidden() {
+            return StatusCode::OK;
+        }
         mgr.set_state(PetState::Permission, None);
     }
     let _ = app.tx.send(StateChangeEvent {
