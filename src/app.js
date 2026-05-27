@@ -273,6 +273,7 @@ async function pollState() {
           overlayActive = false;
           overlayType = '';
           if (window._petBubble) window._petBubble.hideConfirm();
+          exitPermission();  // 清理 permission 状态和定时器
         }
 
         if (data.animation) {
