@@ -109,7 +109,7 @@ html, body {
 
 #ask-bubble {
   position: fixed;
-  bottom: 48px;
+  top: 2px;
   left: 50%;
   transform: translateX(-50%);
   background: rgba(255, 255, 255, 0.92);
@@ -303,4 +303,15 @@ html, body {
   background: #fee2e2;
   color: #ef4444;
   border-color: #fca5a5;
+}
+
+/* 长时间等待时按钮轻微脉冲，防止呆板 */
+#ask-bubble.waiting #ask-confirm-row {
+  animation: btn-breathe 2s ease-in-out infinite;
+}
+
+@keyframes btn-breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.06); opacity: 0.85; }
+}
 }

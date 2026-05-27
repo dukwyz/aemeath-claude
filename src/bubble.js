@@ -104,8 +104,16 @@ class Bubble {
     askPrompt.textContent = '';
     askPrompt.style.display = 'none';
     askRow.classList.remove('hidden');
-    askBubble.classList.remove('hidden');
+    askBubble.classList.remove('hidden', 'waiting');
     askBubble.classList.add('visible');
+
+    // 10 秒后加 waiting 类，触发按钮脉冲呼吸动画
+    clearTimeout(this._waitingTimer);
+    this._waitingTimer = setTimeout(() => {
+      if (askBubble.classList.contains('visible')) {
+        askBubble.classList.add('waiting');
+      }
+    }, 10000);
 
     // Hide regular bubble while confirm is showing
     this.hide();
@@ -118,7 +126,8 @@ class Bubble {
     if (!askBubble) return;
 
     // 立即隐藏，display:none 无残影
-    askBubble.classList.remove('visible');
+    clearTimeout(this._waitingTimer);
+    askBubble.classList.remove('visible', 'waiting');
     askBubble.classList.add('hidden');
     if (askRow) askRow.classList.add('hidden');
     // 重置 prompt 显示状态，下次 showInteractive 时能正常显示

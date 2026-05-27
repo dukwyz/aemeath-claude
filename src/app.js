@@ -336,8 +336,6 @@ async function pollState() {
                   window._petBubble.showConfirm('等待指示...');
                 }
               }, 3000);
-              // Progressive recovery: fade at 15s, clear at 60s
-              schedulePermissionRecovery();
             }
             lastBubble = data.bubble;
             // 只在 permissionPending 为 true 时显示按钮
