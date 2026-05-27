@@ -100,20 +100,24 @@ class Bubble {
     const askRow = document.getElementById('ask-confirm-row');
     if (!askBubble || !askPrompt || !askRow) return;
 
+    // 如果已经在显示，只刷新内容，不重置 waiting 状态
+    const alreadyVisible = askBubble.classList.contains('visible');
+
     // 权限气泡：不显示文字，只留 ✓ ✗ 按钮
     askPrompt.textContent = '';
     askPrompt.style.display = 'none';
     askRow.classList.remove('hidden');
-    askBubble.classList.remove('hidden', 'waiting');
+    askBubble.classList.remove('hidden');
     askBubble.classList.add('visible');
 
-    // 10 秒后加 waiting 类，触发按钮脉冲呼吸动画
-    clearTimeout(this._waitingTimer);
-    this._waitingTimer = setTimeout(() => {
-      if (askBubble.classList.contains('visible')) {
-        askBubble.classList.add('waiting');
-      }
-    }, 10000);
+    // 首次显示时启动 10 秒计时器，之后不再重置
+    if (!alreadyVisible) {
+      this._waitingTimer = setTimeout(() => {
+        if (askBubble.classList.contains('visible')) {
+          askBubble.classList.add('waiting');
+        }
+      }, 10000);
+    }
 
     // Hide regular bubble while confirm is showing
     this.hide();
