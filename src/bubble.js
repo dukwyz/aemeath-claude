@@ -100,7 +100,9 @@ class Bubble {
     const askRow = document.getElementById('ask-confirm-row');
     if (!askBubble || !askPrompt || !askRow) return;
 
-    askPrompt.textContent = text || '等待指示...';
+    // 权限气泡：不显示文字，只留 ✓ ✗ 按钮
+    askPrompt.textContent = '';
+    askPrompt.style.display = 'none';
     askRow.classList.remove('hidden');
     askBubble.classList.remove('hidden');
     askBubble.classList.add('visible');
@@ -111,6 +113,7 @@ class Bubble {
 
   hideConfirm() {
     const askBubble = document.getElementById('ask-bubble');
+    const askPrompt = document.getElementById('ask-prompt');
     const askRow = document.getElementById('ask-confirm-row');
     if (!askBubble) return;
 
@@ -118,6 +121,8 @@ class Bubble {
     askBubble.classList.remove('visible');
     askBubble.classList.add('hidden');
     if (askRow) askRow.classList.add('hidden');
+    // 重置 prompt 显示状态，下次 showInteractive 时能正常显示
+    if (askPrompt) askPrompt.style.display = '';
   }
 
   // ---- interactive input (MCP oneshot: confirm / text / select) ----
@@ -139,8 +144,9 @@ class Bubble {
     if (inputRow) inputRow.classList.add('hidden');
     if (choicesDiv) { choicesDiv.innerHTML = ''; choicesDiv.classList.add('hidden'); }
 
-    // Set prompt
+    // Set prompt (MCP overlay 显示问题文字)
     if (askPrompt) {
+      askPrompt.style.display = '';
       askPrompt.textContent = prompt || '';
     }
 

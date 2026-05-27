@@ -105,23 +105,20 @@ html, body {
   50% { box-shadow: 0 2px 20px rgba(255, 100, 150, 0.3); }
 }
 
-/* ---- ask-bubble (permission confirm) ---- */
+/* ---- ask-bubble (permission confirm / MCP overlay) ---- */
 
 #ask-bubble {
-  position: fixed;
-  bottom: 80px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(255, 240, 245, 0.95);
-  border: 1px solid rgba(255, 150, 180, 0.5);
-  border-radius: 50px;
-  padding: 6px 16px 8px;
+  position: absolute;
+  bottom: 214px;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 12px;
+  padding: 8px 14px;
   font-size: 13px;
   font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
   color: #1e293b;
+  max-width: 220px;
   text-align: center;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
-  animation: gentle-pulse 2s ease-in-out infinite;
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
@@ -135,18 +132,18 @@ html, body {
   height: 0;
   border-left: 8px solid transparent;
   border-right: 8px solid transparent;
-  border-top: 8px solid rgba(255, 240, 245, 0.95);
+  border-top: 8px solid rgba(255, 255, 255, 0.92);
 }
 
 #ask-bubble.hidden {
   opacity: 0;
-  transform: translateX(-50%) scale(0.9);
+  transform: scale(0.9);
   pointer-events: none;
 }
 
 #ask-bubble.visible {
   opacity: 1;
-  transform: translateX(-50%) scale(1);
+  transform: scale(1);
   pointer-events: auto;
 }
 
@@ -159,6 +156,10 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+#ask-prompt:empty {
+  display: none;
 }
 
 #ask-input-row {
@@ -259,7 +260,7 @@ html, body {
 
 #ask-confirm-row {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   justify-content: center;
 }
 
@@ -270,8 +271,8 @@ html, body {
 #ask-confirm-row button {
   border: none;
   border-radius: 6px;
-  padding: 3px 12px;
-  font-size: 12px;
+  padding: 4px 14px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, transform 0.1s ease;
