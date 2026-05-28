@@ -1,13 +1,17 @@
 use axum::{
     extract::State,
-    http::StatusCode,
+    response::sse::{Event, Sse},
     routing::{get, post},
     Json, Router,
 };
+use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt;
 
 use crate::state::{PendingInput, SharedPendingInput, StateChangeEvent};
 
@@ -71,11 +75,12 @@ async fn handle_mcp_request(
             "tools": [
                 {
                     "name": "aemeath_show",
-                    "description": "Show a custom bubble message on the Aemeath pet",
+                    "description": "Show a custom bubble message on the Aemeath pet, optionally with a specific animation",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "msg": { "type": "string", "description": "Message to display" }
+                            "msg": { "type": "string", "description": "Message to display" },
+                            "animation": { "type": "string", "enum": ["idle", "waiting", "jumping", "waving", "running", "review", "failed", "celebrating"], "description": "Animation to play (optional, defaults to current)" }
                         },
                         "required": ["msg"]
                     }
@@ -135,8 +140,9 @@ async fn handle_mcp_request(
             match tool_name {
                 "aemeath_show" => {
                     let msg = args["msg"].as_str().unwrap_or("");
+                    let animation = args["animation"].as_str().unwrap_or("waiting");
                     let _ = app.tx.send(StateChangeEvent {
-                        animation: "waiting".into(),
+                        animation: animation.to_string(),
                         bubble: msg.to_string(),
                         overlay: None,
                         input_type: None,
@@ -329,6 +335,17 @@ async fn handle_mcp_request(
     })
 }
 
-async fn handle_sse() -> StatusCode {
-    StatusCode::OK
+async fn handle_sse(
+    State(app): State<McpAppState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let rx = app.tx.subscribe();
+    let stream = BroadcastStream::new(rx)
+        .then(|result| async move {
+            result.ok().map(|event| {
+                let data = serde_json::to_string(&event).unwrap_or_default();
+                Ok::<_, Infallible>(Event::default().event("state-change").data(data))
+            })
+        })
+        .filter_map(|opt| opt);
+    Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
 }

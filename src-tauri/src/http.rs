@@ -52,6 +52,8 @@ pub fn create_router(
         .route("/api/hook/done", post(handle_hook_done))
         .route("/api/hook/idle", post(handle_hook_idle))
         .route("/api/hook/permission", post(handle_hook_permission))
+        .route("/api/hook/notification", post(handle_hook_notification))
+        .route("/api/hook/subagent-done", post(handle_hook_subagent_done))
         .route("/api/hide", post(handle_hide))
         .route("/api/show", post(handle_show))
         .route("/api/user/pending", get(handle_user_pending))
@@ -126,15 +128,16 @@ async fn handle_current(
 
 async fn handle_hook_thinking(
     State(app): State<AppState>,
-) -> StatusCode {
-    set_pet_state(&app, PetState::Chatting, None).await;
-    StatusCode::OK
+) -> Result<StatusCode, StatusCode> {
+    set_pet_state(&app, PetState::Chatting, None).await
+        .map_err(|e| { eprintln!("[hook/thinking] {}", e); StatusCode::INTERNAL_SERVER_ERROR })?;
+    Ok(StatusCode::OK)
 }
 
 async fn handle_hook_working(
     State(app): State<AppState>,
     body: String,
-) -> StatusCode {
+) -> Result<StatusCode, StatusCode> {
     let tool = serde_json::from_str::<serde_json::Value>(&body)
         .ok()
         .and_then(|v| v.get("tool_name").and_then(|t| t.as_str().map(String::from)));
@@ -148,7 +151,8 @@ async fn handle_hook_working(
         _ => PetState::Running,
     };
 
-    set_pet_state(&app, state.clone(), tool).await;
+    set_pet_state(&app, state.clone(), tool).await
+        .map_err(|e| { eprintln!("[hook/working] {}", e); StatusCode::INTERNAL_SERVER_ERROR })?;
 
     // Cycle running variant for idle-type tools (running/left/right rotation)
     if matches!(state, PetState::Running) {
@@ -156,36 +160,38 @@ async fn handle_hook_working(
         mgr.set_running_variant();
     }
 
-    StatusCode::OK
+    Ok(StatusCode::OK)
 }
 
 async fn handle_hook_done(
     State(app): State<AppState>,
-) -> StatusCode {
+) -> Result<StatusCode, StatusCode> {
     // Branch on tool type: Read/Glob/Grep/Agent → Review, others → Celebrating
     let done_state = {
         let mgr = app.state.lock().await;
         crate::state::StateManager::done_state_for_tool(mgr.current_tool())
     };
-    set_pet_state(&app, done_state, None).await;
-    StatusCode::OK
+    set_pet_state(&app, done_state, None).await
+        .map_err(|e| { eprintln!("[hook/done] {}", e); StatusCode::INTERNAL_SERVER_ERROR })?;
+    Ok(StatusCode::OK)
 }
 
 async fn handle_hook_idle(
     State(app): State<AppState>,
-) -> StatusCode {
-    set_pet_state(&app, PetState::Idle, None).await;
-    StatusCode::OK
+) -> Result<StatusCode, StatusCode> {
+    set_pet_state(&app, PetState::Idle, None).await
+        .map_err(|e| { eprintln!("[hook/idle] {}", e); StatusCode::INTERNAL_SERVER_ERROR })?;
+    Ok(StatusCode::OK)
 }
 
 async fn handle_hook_permission(
     State(app): State<AppState>,
-) -> StatusCode {
+) -> Result<StatusCode, StatusCode> {
     {
         let mut mgr = app.state.lock().await;
         // Skip permission while pet is hidden (fullscreen)
         if mgr.is_force_hidden() {
-            return StatusCode::OK;
+            return Ok(StatusCode::OK);
         }
         mgr.set_state(PetState::Permission, None);
     }
@@ -196,15 +202,50 @@ async fn handle_hook_permission(
         input_type: None,
         options: None,
     });
-    StatusCode::OK
+    Ok(StatusCode::OK)
 }
 
-async fn set_pet_state(app: &AppState, state: PetState, tool: Option<String>) {
+async fn handle_hook_notification(
+    State(app): State<AppState>,
+    body: String,
+) -> Result<StatusCode, StatusCode> {
+    let msg = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("message").and_then(|m| m.as_str().map(String::from)))
+        .unwrap_or_else(|| "Notification".to_string());
+
+    {
+        let mut mgr = app.state.lock().await;
+        if mgr.is_force_hidden() {
+            return Ok(StatusCode::OK);
+        }
+        mgr.set_state(PetState::Chatting, None);
+    }
+
+    let _ = app.tx.send(StateChangeEvent {
+        animation: "waiting".to_string(),
+        bubble: msg,
+        overlay: None,
+        input_type: None,
+        options: None,
+    });
+    Ok(StatusCode::OK)
+}
+
+async fn handle_hook_subagent_done(
+    State(app): State<AppState>,
+) -> Result<StatusCode, StatusCode> {
+    set_pet_state(&app, PetState::Celebrating, None).await
+        .map_err(|e| { eprintln!("[hook/subagent-done] {}", e); StatusCode::INTERNAL_SERVER_ERROR })?;
+    Ok(StatusCode::OK)
+}
+
+async fn set_pet_state(app: &AppState, state: PetState, tool: Option<String>) -> Result<(), String> {
     let mut mgr = app.state.lock().await;
 
     // Skip state changes while game_guard has forced the pet hidden (fullscreen)
     if mgr.is_force_hidden() {
-        return;
+        return Ok(());
     }
 
     // Protect Permission state: don't let other hooks override it while waiting for user input.
@@ -212,7 +253,7 @@ async fn set_pet_state(app: &AppState, state: PetState, tool: Option<String>) {
     if matches!(mgr.current_state(), PetState::Permission)
         && !matches!(state, PetState::Permission)
     {
-        return;
+        return Ok(());
     }
 
     // Protect tool bubble minimum display time (all active states)
@@ -225,7 +266,7 @@ async fn set_pet_state(app: &AppState, state: PetState, tool: Option<String>) {
         && is_active
         && mgr.should_keep_running(800)
     {
-        return;
+        return Ok(());
     }
 
     mgr.set_state(state, tool.clone());
@@ -233,13 +274,15 @@ async fn set_pet_state(app: &AppState, state: PetState, tool: Option<String>) {
     let bubble = mgr.current_state().bubble_text(tool.as_deref()).to_string();
     drop(mgr);
 
-    let _ = app.tx.send(StateChangeEvent {
+    app.tx.send(StateChangeEvent {
         animation,
         bubble,
         overlay: None,
         input_type: None,
         options: None,
-    });
+    }).map_err(|e| format!("broadcast send failed: {}", e))?;
+
+    Ok(())
 }
 
 async fn handle_hide(

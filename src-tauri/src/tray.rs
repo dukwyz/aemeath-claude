@@ -1,7 +1,7 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Emitter, Manager,
 };
 
 pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -41,6 +41,16 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 "quit" => {
                     app.exit(0);
+                }
+                "about" => {
+                    use crate::state::StateChangeEvent;
+                    let _ = app.emit("state-change", StateChangeEvent {
+                        animation: "waiting".to_string(),
+                        bubble: "Aemeath v0.2.1".to_string(),
+                        overlay: None,
+                        input_type: None,
+                        options: None,
+                    });
                 }
                 _ => {}
             }

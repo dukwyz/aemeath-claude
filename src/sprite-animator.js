@@ -14,10 +14,18 @@ class SpriteAnimator {
     spriteEl.parentNode.replaceChild(this.canvas, spriteEl);
     this.el = this.canvas;
 
-    this.frameInterval = 180;
+    this.defaultFrameInterval = 180;
     this.currentAnimation = null;
     this.frameIndex = 0;
     this.timer = null;
+
+    // Per-animation speed overrides (ms per frame)
+    this.animSpeeds = {
+      idle: 250,
+      waiting: 220,
+      waving: 220,
+      jumping: 220,
+    };
 
     // Load spritesheet image
     this.sheetImg = new Image();
@@ -52,10 +60,11 @@ class SpriteAnimator {
 
     const animFrames = this.frameMap[animName];
     if (animFrames && animFrames.length > 1) {
+      const interval = this.animSpeeds[animName] || this.defaultFrameInterval;
       this.timer = setInterval(() => {
         this.frameIndex = (this.frameIndex + 1) % animFrames.length;
         this._tick();
-      }, this.frameInterval);
+      }, interval);
     }
   }
 

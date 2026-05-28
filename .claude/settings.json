@@ -5,7 +5,7 @@
         "matcher": "",
         "hooks": [{
           "type": "command",
-          "command": "powershell -Command \"if (-not (Get-Process -Name 'aemeath-claude' -ErrorAction SilentlyContinue)) { Start-Process 'D:/path/to/aemeath-claude.exe' }\""
+          "command": "powershell -Command \"if (-not (Get-Process -Name 'aemeath-claude' -ErrorAction SilentlyContinue)) { Start-Process 'D:/path/to/aemeath-claude.exe' }; if (-not (Get-Process -Name 'pythonw' -ErrorAction SilentlyContinue)) { Start-Process 'pythonw' -ArgumentList 'D:/path/to/game_guard.py' }\""
         }]
       }
     ],
@@ -51,6 +51,24 @@
         "hooks": [{
           "type": "http",
           "url": "http://127.0.0.1:9527/api/hook/permission"
+        }]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [{
+          "type": "http",
+          "url": "http://127.0.0.1:9527/api/hook/notification"
+        }]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [{
+          "type": "http",
+          "url": "http://127.0.0.1:9527/api/hook/subagent-done"
         }]
       }
     ]

@@ -289,21 +289,8 @@ async function pollState() {
             }
           }
 
-          // Approve/new message: clear permission on non-waving, non-idle
-          // 但按钮最少显示 3 秒，防止状态切换太快把按钮清掉
-          if (permissionPending && data.animation !== 'waving' && data.animation !== 'idle') {
-            if (Date.now() - confirmShownAt > 3000) {
-              exitPermission();
-              window._petBubble.hide();
-            }
-          }
-          // ESC/deny → idle: clear permission silently
-          if (permissionPending && data.animation === 'idle') {
-            if (Date.now() - confirmShownAt > 3000) {
-              exitPermission();
-              window._petBubble.hide();
-            }
-          }
+          // Permission mode: keep bubble visible until user clicks approve/deny
+          // Hook 触发不再清除 permission 状态，只有用户操作或超时才清除
           // Idle animation + reminders
           if (data.animation === 'idle') {
             if (!idleStart) idleStart = Date.now();
