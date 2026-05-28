@@ -52,6 +52,15 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                         options: None,
                     });
                 }
+                "scale_1x" => {
+                    let _ = app.emit("set-scale", serde_json::json!({"factor": 1.0}));
+                }
+                "scale_1_5x" => {
+                    let _ = app.emit("set-scale", serde_json::json!({"factor": 1.5}));
+                }
+                "scale_2x" => {
+                    let _ = app.emit("set-scale", serde_json::json!({"factor": 2.0}));
+                }
                 _ => {}
             }
         })

@@ -79,6 +79,24 @@ async function init() {
   window._petBubble = bubble;
   window._petAnimator = animator;
   const ipc = window.__TAURI_INTERNALS__;
+
+  // Scale: restore from localStorage
+  const savedScale = parseFloat(localStorage.getItem('pet-scale') || '1');
+  if (savedScale !== 1) {
+    document.body.style.transform = `scale(${savedScale})`;
+    document.body.style.transformOrigin = 'top left';
+  }
+
+  // Scale: listen for tray menu changes
+  if (ipc && ipc.listen) {
+    ipc.listen('set-scale', (event) => {
+      const factor = event.payload.factor;
+      document.body.style.transform = `scale(${factor})`;
+      document.body.style.transformOrigin = 'top left';
+      localStorage.setItem('pet-scale', factor);
+    });
+  }
+
   let lastClickTime = 0;
   let clickTimer = null;
   document.addEventListener('mousedown', (e) => {

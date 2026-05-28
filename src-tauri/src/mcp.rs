@@ -17,6 +17,21 @@ use crate::state::{PendingInput, SharedPendingInput, StateChangeEvent};
 
 pub type McpState = Arc<Mutex<crate::state::StateManager>>;
 
+fn format_timestamp(secs: u64) -> String {
+    let duration = std::time::Duration::from_secs(secs);
+    let Some(since_epoch) = std::time::UNIX_EPOCH.checked_add(duration) else {
+        return "??:??:??".to_string();
+    };
+    let Ok(elapsed) = since_epoch.duration_since(std::time::UNIX_EPOCH) else {
+        return "??:??:??".to_string();
+    };
+    let total_secs = elapsed.as_secs();
+    let h = (total_secs / 3600) % 24;
+    let m = (total_secs / 60) % 60;
+    let s = total_secs % 60;
+    format!("{:02}:{:02}:{:02}", h, m, s)
+}
+
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
     #[serde(default)]
@@ -302,10 +317,16 @@ async fn handle_mcp_request(
                 "aemeath://history" => {
                     let mgr = app.state.lock().await;
                     let history = mgr.history();
+                    let mut text = String::from("Time | State | Tool\n-----|-------|-----\n");
+                    for record in history.iter().rev() {
+                        let time = format_timestamp(record.timestamp);
+                        let tool = record.tool.as_deref().unwrap_or("-");
+                        text.push_str(&format!("{} | {:?} | {}\n", time, record.state, tool));
+                    }
                     json!({
                         "contents": [{
                             "uri": "aemeath://history",
-                            "text": serde_json::to_string(history).unwrap_or_default()
+                            "text": text
                         }]
                     })
                 }
