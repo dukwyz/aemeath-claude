@@ -23,6 +23,28 @@ cargo build --manifest-path src-tauri/Cargo.toml --release
 
 产出在 `src-tauri/target/release/`。
 
+## 发版（必须遵守）
+
+**每次 commit + push 源码后，必须同时发布 exe 到 GitHub Releases。流程：**
+
+```bash
+# 1. 从 Cargo.toml 读取版本号
+# 2. 打 tag（如果 tag 不存在）
+git tag -a vX.Y.Z -m " vX.Y.Z: 简要描述"
+git push origin vX.Y.Z
+
+# 3. 创建 Release 并上传 exe
+gh release create vX.Y.Z src-tauri/target/release/aemeath-claude.exe \
+  --title "vX.Y.Z" \
+  --notes "更新日志"
+```
+
+**规则：**
+- 版本号从 `src-tauri/Cargo.toml` 的 `version` 字段读取
+- tag 格式：`vX.Y.Z`（跟 Cargo.toml 一致）
+- release notes 写清楚改了什么（feat/fix/chore）
+- **不能只推源码不推 exe，用户需要下载安装**
+
 ## 前置要求
 
 - [Rust](https://rustup.rs/) (stable toolchain)
