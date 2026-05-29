@@ -140,11 +140,10 @@ mod winffi {
         pub fn GetWindowTextLengthW(hWnd: isize) -> i32;
         pub fn IsWindowVisible(hWnd: isize) -> i32;
         pub fn SetForegroundWindow(hWnd: isize) -> i32;
-        pub fn ShowWindow(hWnd: isize, nCmdShow: i32) -> i32;
         pub fn GetForegroundWindow() -> isize;
+        pub fn GetClassNameW(hWnd: isize, lpClassName: *mut u16, nMaxCount: i32) -> i32;
         pub fn keybd_event(bVk: u8, bScan: u8, dwFlags: u32, dwExtraInfo: usize);
     }
-    pub const SW_RESTORE: i32 = 9;
     pub const KEYEVENTF_KEYUP: u32 = 0x0002;
     pub const VK_CONTROL: u8 = 0x11;
     pub const VK_V: u8 = 0x56;
@@ -159,7 +158,7 @@ fn relay_to_terminal(msg: &str) {
 
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-        // 1. Copy message to clipboard via PowerShell
+        // 1. Copy message to clipboard via PowerShell (slow, do first)
         let ps_cmd = format!(
             "Set-Clipboard -Value '{}'",
             msg.replace('\'', "''")
@@ -169,9 +168,10 @@ fn relay_to_terminal(msg: &str) {
             .creation_flags(CREATE_NO_WINDOW)
             .output();
 
-        // 2. Find Claude Code window by title
+        // 2. Find Claude Code window by title + class name
+        //    (hwnd, is_terminal, is_vscode)
         use std::sync::Mutex;
-        static FOUND_HWND: Mutex<Vec<isize>> = Mutex::new(Vec::new());
+        static FOUND_HWND: Mutex<Vec<(isize, bool, bool)>> = Mutex::new(Vec::new());
 
         unsafe {
             FOUND_HWND.lock().unwrap().clear();
@@ -182,8 +182,23 @@ fn relay_to_terminal(msg: &str) {
                         let mut buf = vec![0u16; (len + 1) as usize];
                         winffi::GetWindowTextW(hwnd, buf.as_mut_ptr(), len + 1);
                         let title = String::from_utf16_lossy(&buf);
+
                         if title.to_lowercase().contains("claude") {
-                            FOUND_HWND.lock().unwrap().push(hwnd);
+                            // Get window class name
+                            let mut class_buf = [0u16; 256];
+                            winffi::GetClassNameW(hwnd, class_buf.as_mut_ptr(), 256);
+                            let class_name = String::from_utf16_lossy(&class_buf)
+                                .trim_matches('\0')
+                                .to_lowercase();
+
+                            let is_terminal = class_name.contains("consolewindowclass")
+                                || class_name.contains("cascadiamainwindow")
+                                || class_name.contains("windows.ui.core.corewindow")
+                                || class_name.contains("putty")
+                                || class_name.contains("mobaxterm");
+                            let is_vscode = class_name == "chrome_widgetwin_1";
+
+                            FOUND_HWND.lock().unwrap().push((hwnd, is_terminal, is_vscode));
                         }
                     }
                 }
@@ -192,18 +207,20 @@ fn relay_to_terminal(msg: &str) {
             winffi::EnumWindows(enum_callback as *const () as isize, 0);
         }
 
+        // Prefer terminal > non-VSCode > any match
         let hwnd = {
             let found = FOUND_HWND.lock().unwrap();
-            found.first().copied()
+            found.iter()
+                .find(|(_, is_terminal, _)| *is_terminal)
+                .or_else(|| found.iter().find(|(_, _, is_vscode)| !is_vscode))
+                .or_else(|| found.first())
+                .map(|(h, _, _)| *h)
         };
 
         if let Some(hwnd) = hwnd {
             unsafe {
                 let prev = winffi::GetForegroundWindow();
-                winffi::ShowWindow(hwnd, winffi::SW_RESTORE);
-                std::thread::sleep(std::time::Duration::from_millis(50));
                 winffi::SetForegroundWindow(hwnd);
-                std::thread::sleep(std::time::Duration::from_millis(50));
 
                 // Ctrl+V
                 winffi::keybd_event(winffi::VK_CONTROL, 0, 0, 0);

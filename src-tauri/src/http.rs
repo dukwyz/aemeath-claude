@@ -193,6 +193,8 @@ async fn handle_hook_permission(
         if mgr.is_force_hidden() {
             return Ok(StatusCode::OK);
         }
+        // Intentionally bypasses set_pet_state() to avoid the Permission
+        // protection guard — Permission must be enterable from any state.
         mgr.set_state(PetState::Permission, None);
     }
     let _ = app.tx.send(StateChangeEvent {

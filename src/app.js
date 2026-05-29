@@ -128,7 +128,6 @@ async function init() {
     });  // bubbling phase，在按钮 handler 之后拦截
   }
   pollState();
-  pollPendingInput();
 }
 
 // ---- Interactive input handlers (MCP overlay) ----
@@ -223,15 +222,6 @@ async function submitPendingInput(answer) {
   } catch (_) {}
 }
 
-async function pollPendingInput() {
-  // Overlay UI is entirely driven by pollState via the overlay field.
-  // This loop is kept only as a safety net for edge cases where
-  // pollState misses a timeout. It does NOT manage overlayActive.
-  while (true) {
-    await new Promise(r => setTimeout(r, 2000));
-  }
-}
-
 function isToolBubble(text) {
   return text && (
     text.includes('正在读取') || text.includes('正在写') ||
@@ -307,8 +297,21 @@ async function pollState() {
             }
           }
 
-          // Permission mode: keep bubble visible until user clicks approve/deny
-          // Hook 触发不再清除 permission 状态，只有用户操作或超时才清除
+          // Approve/new message: clear permission on non-waving, non-idle
+          // 但按钮最少显示 3 秒，防止状态切换太快把按钮清掉
+          if (permissionPending && data.animation !== 'waving' && data.animation !== 'idle') {
+            if (Date.now() - confirmShownAt > 3000) {
+              exitPermission();
+              window._petBubble.hide();
+            }
+          }
+          // ESC/deny → idle: clear permission silently
+          if (permissionPending && data.animation === 'idle') {
+            if (Date.now() - confirmShownAt > 3000) {
+              exitPermission();
+              window._petBubble.hide();
+            }
+          }
           // Idle animation + reminders
           if (data.animation === 'idle') {
             if (!idleStart) idleStart = Date.now();
@@ -376,6 +379,13 @@ async function pollState() {
   }
 }
 
+// Permission lifecycle:
+//   Entry: pollState detects "等待指示..." bubble → sets permissionPending
+//   Exit paths:
+//     1. User clicks ✓/✗ → IPC approve/deny → clear_permission_state (backend) + exitPermission (frontend)
+//     2. Tool bubble arrives → exitPermission (frontend only, backend still Permission → blocked by guard)
+//     3. 60s timeout → schedulePermissionRecovery → exitPermission
+//     4. MCP overlay dismisses → exitPermission
 function exitPermission() {
   permissionPending = false;
   permissionResolvedAt = Date.now();  // 2秒内不重新触发
@@ -385,35 +395,8 @@ function exitPermission() {
   clearNamedTimer('permissionClear');
   // Reset opacity if it was faded
   if (window._petBubble) {
-    window._petBubble.el.style.transition = '';
-    window._petBubble.el.style.opacity = '';
     window._petBubble.hideConfirm();
   }
-}
-
-function schedulePermissionRecovery() {
-  // 15s: start fading the ask-bubble
-  setNamedTimeout('permissionFade', () => {
-    if (permissionPending) {
-      const askBubble = document.getElementById('ask-bubble');
-      if (askBubble) {
-        askBubble.style.transition = 'opacity 2s ease';
-        askBubble.style.opacity = '0.4';
-      }
-    }
-  }, 15000);
-  // 60s: fully clear permission state
-  setNamedTimeout('permissionClear', () => {
-    if (permissionPending) {
-      const askBubble = document.getElementById('ask-bubble');
-      if (askBubble) {
-        askBubble.style.transition = 'opacity 0.5s ease';
-        askBubble.style.opacity = '';
-      }
-      exitPermission();
-      if (window._petBubble) window._petBubble.hideConfirm();
-    }
-  }, 60000);
 }
 
 function scheduleIdleAnim() {

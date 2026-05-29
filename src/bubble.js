@@ -109,18 +109,20 @@ class Bubble {
     askRow.classList.remove('hidden');
     askBubble.classList.remove('hidden');
     askBubble.classList.add('visible');
+    // 清除 schedulePermissionRecovery 设的 inline opacity，保持按钮 100% 可见
+    askBubble.style.transition = '';
+    askBubble.style.opacity = '';
 
-    // 首次显示时启动 10 秒计时器，之后不再重置
+    // 首次显示时：启动 10s 呼吸计时器 + 隐藏普通气泡
     if (!alreadyVisible) {
       this._waitingTimer = setTimeout(() => {
         if (askBubble.classList.contains('visible')) {
           askBubble.classList.add('waiting');
         }
       }, 10000);
+      // 仅首次隐藏普通气泡，后续 poll 刷新不再压制
+      this.hide();
     }
-
-    // Hide regular bubble while confirm is showing
-    this.hide();
   }
 
   hideConfirm() {
