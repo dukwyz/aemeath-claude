@@ -109,9 +109,6 @@ class Bubble {
     askRow.classList.remove('hidden');
     askBubble.classList.remove('hidden');
     askBubble.classList.add('visible');
-    // 清除 schedulePermissionRecovery 设的 inline opacity，保持按钮 100% 可见
-    askBubble.style.transition = '';
-    askBubble.style.opacity = '';
 
     // 首次显示时：启动 10s 呼吸计时器 + 隐藏普通气泡
     if (!alreadyVisible) {
@@ -210,22 +207,6 @@ class Bubble {
     if (confirmRow) confirmRow.classList.add('hidden');
     if (inputRow) inputRow.classList.add('hidden');
     if (choicesDiv) { choicesDiv.innerHTML = ''; choicesDiv.classList.add('hidden'); }
-  }
-
-  // ---- Quick menu (right-click) ----
-
-  showQuickMenu() {
-    const menu = document.getElementById('quick-menu');
-    if (!menu) return;
-    // Don't show if interactive bubble is already open
-    const askBubble = document.getElementById('ask-bubble');
-    if (askBubble && !askBubble.classList.contains('hidden')) return;
-    menu.classList.remove('hidden');
-  }
-
-  hideQuickMenu() {
-    const menu = document.getElementById('quick-menu');
-    if (menu) menu.classList.add('hidden');
   }
 }
 

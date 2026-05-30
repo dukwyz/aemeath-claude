@@ -118,21 +118,8 @@ async function init() {
       }, 50);
     }
   });
-
-  // Right-click on sprite → quick menu
-  const spriteEl = document.getElementById('sprite');
-  if (spriteEl) {
-    spriteEl.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      if (window._petBubble) window._petBubble.showQuickMenu();
-    });
-  }
-  // Suppress browser right-click menu everywhere else
-  document.addEventListener('contextmenu', (e) => e.preventDefault());
-
   setupConfirmButtons();
   setupInteractiveInputs();
-  setupQuickMenu();
   // 拦截 ask-bubble 上所有 mousedown，阻止冒泡到 document 触发拖拽
   const askBubble = document.getElementById('ask-bubble');
   if (askBubble) {
@@ -216,80 +203,11 @@ async function submitInteractive(answer) {
   overlayType = '';
   if (window._petBubble) window._petBubble.hideConfirm();
   exitPermission();
-  // Message mode: send to CC terminal instead of MCP pending input
-  if (window._messageMode) {
-    window._messageMode = false;
-    if (answer && answer !== 'dismiss') {
-      await sendMessageToTerminal(answer);
-    }
-    return;
-  }
   await submitPendingInput(answer);  // 确保后端收到再返回
 }
 
 function setupConfirmButtons() {
   // Button handlers are now in setupInteractiveInputs()
-}
-
-// ---- Quick menu (right-click) ----
-
-function setupQuickMenu() {
-  const menu = document.getElementById('quick-menu');
-  if (!menu) return;
-  const items = menu.querySelectorAll('.quick-menu-item');
-
-  items.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const action = btn.dataset.action;
-      if (window._petBubble) window._petBubble.hideQuickMenu();
-      switch (action) {
-        case 'message':
-          // Show text input for sending message to CC terminal
-          if (window._petBubble) {
-            window._petBubble.showInteractive('发消息给爱弥斯...', 'text', null);
-          }
-          // Set up one-time message send handler
-          window._messageMode = true;
-          break;
-        case 'voice':
-          if (window._petBubble) window._petBubble.show('语音输入暂不支持~');
-          break;
-        case 'sleep':
-          try { window.__TAURI_INTERNALS__?.invoke('hide_window'); } catch (_) {}
-          if (window._petBubble) window._petBubble.show('爱弥斯已休眠，右键托盘唤醒~');
-          break;
-        case 'exit':
-          try { window.__TAURI_INTERNALS__?.invoke('exit_app'); } catch (_) {}
-          break;
-        case 'cancel':
-          break;
-      }
-    });
-  });
-
-  // Click outside quick menu to close
-  document.addEventListener('click', (e) => {
-    if (!menu.classList.contains('hidden') &&
-        !menu.contains(e.target) &&
-        e.target !== document.getElementById('sprite')) {
-      if (window._petBubble) window._petBubble.hideQuickMenu();
-    }
-  });
-}
-
-// ---- Send message to Claude Code terminal ----
-
-async function sendMessageToTerminal(msg) {
-  try {
-    await fetch('http://127.0.0.1:9527/api/user/message', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ value: msg }),
-    });
-    if (window._petBubble) window._petBubble.show('消息已发送~');
-  } catch (_) {
-    if (window._petBubble) window._petBubble.show('发送失败...');
-  }
 }
 
 // ---- MCP oneshot pending input ----
@@ -379,21 +297,8 @@ async function pollState() {
             }
           }
 
-          // Approve/new message: clear permission on non-waving, non-idle
-          // 但按钮最少显示 3 秒，防止状态切换太快把按钮清掉
-          if (permissionPending && data.animation !== 'waving' && data.animation !== 'idle') {
-            if (Date.now() - confirmShownAt > 3000) {
-              exitPermission();
-              window._petBubble.hide();
-            }
-          }
-          // ESC/deny → idle: clear permission silently
-          if (permissionPending && data.animation === 'idle') {
-            if (Date.now() - confirmShownAt > 3000) {
-              exitPermission();
-              window._petBubble.hide();
-            }
-          }
+          // Permission mode: keep bubble visible until user clicks approve/deny
+          // Hook 触发不再清除 permission 状态，只有用户操作或超时才清除
           // Idle animation + reminders
           if (data.animation === 'idle') {
             if (!idleStart) idleStart = Date.now();
@@ -426,6 +331,7 @@ async function pollState() {
                   window._petBubble.showConfirm('等待指示...');
                 }
               }, 3000);
+              schedulePermissionRecovery();
             }
             lastBubble = data.bubble;
             // 只在 permissionPending 为 true 时显示按钮
@@ -477,8 +383,35 @@ function exitPermission() {
   clearNamedTimer('permissionClear');
   // Reset opacity if it was faded
   if (window._petBubble) {
+    window._petBubble.el.style.transition = '';
+    window._petBubble.el.style.opacity = '';
     window._petBubble.hideConfirm();
   }
+}
+
+function schedulePermissionRecovery() {
+  // 15s: start fading the ask-bubble
+  setNamedTimeout('permissionFade', () => {
+    if (permissionPending) {
+      const askBubble = document.getElementById('ask-bubble');
+      if (askBubble) {
+        askBubble.style.transition = 'opacity 2s ease';
+        askBubble.style.opacity = '0.4';
+      }
+    }
+  }, 15000);
+  // 60s: fully clear permission state
+  setNamedTimeout('permissionClear', () => {
+    if (permissionPending) {
+      const askBubble = document.getElementById('ask-bubble');
+      if (askBubble) {
+        askBubble.style.transition = 'opacity 0.5s ease';
+        askBubble.style.opacity = '';
+      }
+      exitPermission();
+      if (window._petBubble) window._petBubble.hideConfirm();
+    }
+  }, 60000);
 }
 
 function scheduleIdleAnim() {

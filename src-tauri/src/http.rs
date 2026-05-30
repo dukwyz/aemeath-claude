@@ -5,6 +5,7 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use serde_json;
 use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -37,6 +38,7 @@ pub fn create_router(
     tx: broadcast::Sender<StateChangeEvent>,
     vis_tx: broadcast::Sender<super::VisibilityEvent>,
     pending: SharedPendingInput,
+    claude_hwnd: std::sync::Arc<std::sync::Mutex<isize>>,
 ) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -58,8 +60,10 @@ pub fn create_router(
         .route("/api/show", post(handle_show))
         .route("/api/user/pending", get(handle_user_pending))
         .route("/api/user/input", post(handle_user_input))
+        .route("/api/user/message", post(handle_user_message))
+        .route("/api/user/message/pending", get(handle_user_message_pending))
         .layer(cors)
-        .with_state(AppState { state, tx, vis_tx, pending })
+        .with_state(AppState { state, tx, vis_tx, pending, claude_hwnd })
 }
 
 #[derive(Clone)]
@@ -68,6 +72,7 @@ struct AppState {
     tx: broadcast::Sender<StateChangeEvent>,
     vis_tx: broadcast::Sender<super::VisibilityEvent>,
     pending: SharedPendingInput,
+    claude_hwnd: std::sync::Arc<std::sync::Mutex<isize>>,
 }
 
 async fn handle_state(
@@ -347,6 +352,11 @@ pub struct UserInputRequest {
     pub answer: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UserMessageRequest {
+    pub value: String,
+}
+
 async fn handle_user_input(
     State(app): State<AppState>,
     Json(body): Json<UserInputRequest>,
@@ -362,4 +372,133 @@ async fn handle_user_input(
         }
         None => StatusCode::CONFLICT, // 409: no pending input to answer
     }
+}
+
+// ---- Message Sync endpoints (pet → Claude Code terminal) ----
+
+/// POST /api/user/message — receive message from pet UI, relay to Claude Code terminal
+async fn handle_user_message(
+    State(app): State<AppState>,
+    Json(body): Json<UserMessageRequest>,
+) -> StatusCode {
+    let msg = body.value.clone();
+
+    // Store message for MCP resource consumption
+    {
+        let mut mgr = app.state.lock().await;
+        mgr.push_message(msg.clone());
+    }
+
+    // Relay the message to Claude Code terminal as keystrokes
+    let hwnd = *app.claude_hwnd.lock().unwrap();
+    relay_to_terminal(&msg, hwnd);
+
+    StatusCode::OK
+}
+
+/// GET /api/user/message/pending — return and clear pending user messages
+async fn handle_user_message_pending(
+    State(app): State<AppState>,
+) -> Json<serde_json::Value> {
+    let mut mgr = app.state.lock().await;
+    let msgs = mgr.drain_messages();
+    Json(serde_json::json!({
+        "messages": msgs,
+        "count": msgs.len(),
+    }))
+}
+
+/// Copy message to clipboard, then paste into the Claude Code terminal window.
+fn relay_to_terminal(msg: &str, bound_hwnd: isize) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    // 1. Copy message to clipboard via PowerShell
+    let escaped = msg.replace('\'', "''");
+    let set_clip = format!("Set-Clipboard -Value '{}'", escaped);
+    let _ = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &set_clip])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+
+    // 2. Find Claude Code window and paste
+    std::thread::spawn(move || {
+        unsafe { paste_to_window(bound_hwnd); }
+    });
+}
+
+// ---- Windows API FFI for message relay ----
+
+static FOUND_HWND: std::sync::Mutex<isize> = std::sync::Mutex::new(0);
+
+const SEARCH_TERMS: &[&str] = &["claude"];
+
+unsafe extern "system" fn enum_callback(hwnd: isize, _lparam: isize) -> i32 {
+    if IsWindowVisible(hwnd) == 0 {
+        return 1;
+    }
+    let mut buf = [0u16; 512];
+    let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), 512);
+    if len > 0 {
+        let title = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
+        for term in SEARCH_TERMS {
+            if title.contains(term) {
+                *FOUND_HWND.lock().unwrap() = hwnd;
+                return 0; // stop
+            }
+        }
+    }
+    1 // continue
+}
+
+unsafe fn paste_to_window(bound_hwnd: isize) {
+    // 1. Search for the current topmost "claude" window
+    *FOUND_HWND.lock().unwrap() = 0;
+    EnumWindows(Some(enum_callback), 0);
+    let mut hwnd = *FOUND_HWND.lock().unwrap();
+
+    // 2. Fall back to bound HWND if search found nothing (e.g. terminal minimized)
+    if hwnd == 0 && bound_hwnd != 0 && IsWindow(bound_hwnd) != 0 {
+        hwnd = bound_hwnd;
+    }
+
+    if hwnd == 0 {
+        return;
+    }
+
+    let prev = GetForegroundWindow();
+
+    ShowWindow(hwnd, 9); // SW_RESTORE
+    SetForegroundWindow(hwnd);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Ctrl+V
+    keybd_event(0x11, 0, 0, 0);
+    keybd_event(0x56, 0, 0, 0);
+    keybd_event(0x56, 0, 2, 0);
+    keybd_event(0x11, 0, 2, 0);
+
+    std::thread::sleep(std::time::Duration::from_millis(80));
+
+    // Enter
+    keybd_event(0x0D, 0, 0, 0);
+    keybd_event(0x0D, 0, 2, 0);
+
+    // Restore previous focus
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    if prev != 0 {
+        SetForegroundWindow(prev);
+    }
+}
+
+#[allow(clashing_extern_declarations)]
+extern "system" {
+    fn EnumWindows(cb: Option<unsafe extern "system" fn(isize, isize) -> i32>, lp: isize) -> i32;
+    fn GetWindowTextW(hwnd: isize, text: *mut u16, max: i32) -> i32;
+    fn IsWindowVisible(hwnd: isize) -> i32;
+    fn IsWindow(hwnd: isize) -> i32;
+    fn SetForegroundWindow(hwnd: isize) -> i32;
+    fn GetForegroundWindow() -> isize;
+    fn ShowWindow(hwnd: isize, cmd: i32) -> i32;
+    fn keybd_event(vk: u8, scan: u8, flags: u32, extra: usize);
 }

@@ -25,15 +25,6 @@ struct TauriAppState {
 
 #[tokio::main]
 async fn main() {
-    // Capture the foreground window HWND before Tauri creates its own window.
-    // At startup (triggered by Claude Code), the foreground window is the Claude Code terminal.
-    let claude_hwnd: Arc<std::sync::Mutex<isize>> = Arc::new(std::sync::Mutex::new(0));
-    unsafe {
-        let hwnd = GetForegroundWindow();
-        *claude_hwnd.lock().unwrap() = hwnd;
-        println!("Claude Code HWND bound: {}", hwnd);
-    }
-
     let state_manager = Arc::new(Mutex::new(StateManager::new()));
     let (tx, _rx) = broadcast::channel::<StateChangeEvent>(32);
     let (vis_tx, _vis_rx) = broadcast::channel::<VisibilityEvent>(4);
@@ -45,11 +36,10 @@ async fn main() {
     let tx_http = tx.clone();
     let vis_tx_http = vis_tx.clone();
     let pending_http = pending_input.clone();
-    let hwnd_http = claude_hwnd.clone();
 
     // Spawn HTTP server on :9527
     tokio::spawn(async move {
-        let app = http::create_router(sm_http, tx_http, vis_tx_http, pending_http, hwnd_http);
+        let app = http::create_router(sm_http, tx_http, vis_tx_http, pending_http);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:9527").await.unwrap();
         println!("HTTP server listening on http://127.0.0.1:9527");
         axum::serve(listener, app).await.unwrap();
@@ -75,7 +65,7 @@ async fn main() {
 
     tauri::Builder::default()
         .manage(tauri_state)
-        .invoke_handler(tauri::generate_handler![start_drag, open_obsidian, approve_permission, deny_permission, hide_window, exit_app])
+        .invoke_handler(tauri::generate_handler![start_drag, open_obsidian, approve_permission, deny_permission])
         .setup(move |app| {
             // Listen to broadcast channel, forward state changes to frontend
             let handle = app.handle().clone();
@@ -140,24 +130,9 @@ fn open_obsidian() {
         .spawn();
 }
 
-#[tauri::command]
-fn hide_window(window: tauri::Window) {
-    let _ = window.hide();
-}
-
-#[tauri::command]
-fn exit_app(app: tauri::AppHandle) {
-    app.exit(0);
-}
-
-extern "system" {
-    fn GetForegroundWindow() -> isize;
-}
-
 // ---- Windows FFI for relay_to_terminal ----
 
 #[cfg(target_os = "windows")]
-#[allow(clashing_extern_declarations)]
 mod winffi {
     extern "system" {
         pub fn EnumWindows(lpEnumFunc: isize, lParam: isize) -> i32;
@@ -165,10 +140,11 @@ mod winffi {
         pub fn GetWindowTextLengthW(hWnd: isize) -> i32;
         pub fn IsWindowVisible(hWnd: isize) -> i32;
         pub fn SetForegroundWindow(hWnd: isize) -> i32;
+        pub fn ShowWindow(hWnd: isize, nCmdShow: i32) -> i32;
         pub fn GetForegroundWindow() -> isize;
-        pub fn GetClassNameW(hWnd: isize, lpClassName: *mut u16, nMaxCount: i32) -> i32;
         pub fn keybd_event(bVk: u8, bScan: u8, dwFlags: u32, dwExtraInfo: usize);
     }
+    pub const SW_RESTORE: i32 = 9;
     pub const KEYEVENTF_KEYUP: u32 = 0x0002;
     pub const VK_CONTROL: u8 = 0x11;
     pub const VK_V: u8 = 0x56;
@@ -183,7 +159,7 @@ fn relay_to_terminal(msg: &str) {
 
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-        // 1. Copy message to clipboard via PowerShell (slow, do first)
+        // 1. Copy message to clipboard via PowerShell
         let ps_cmd = format!(
             "Set-Clipboard -Value '{}'",
             msg.replace('\'', "''")
@@ -193,10 +169,9 @@ fn relay_to_terminal(msg: &str) {
             .creation_flags(CREATE_NO_WINDOW)
             .output();
 
-        // 2. Find Claude Code window by title + class name
-        //    (hwnd, is_terminal, is_vscode)
+        // 2. Find Claude Code window by title
         use std::sync::Mutex;
-        static FOUND_HWND: Mutex<Vec<(isize, bool, bool)>> = Mutex::new(Vec::new());
+        static FOUND_HWND: Mutex<Vec<isize>> = Mutex::new(Vec::new());
 
         unsafe {
             FOUND_HWND.lock().unwrap().clear();
@@ -207,23 +182,8 @@ fn relay_to_terminal(msg: &str) {
                         let mut buf = vec![0u16; (len + 1) as usize];
                         winffi::GetWindowTextW(hwnd, buf.as_mut_ptr(), len + 1);
                         let title = String::from_utf16_lossy(&buf);
-
                         if title.to_lowercase().contains("claude") {
-                            // Get window class name
-                            let mut class_buf = [0u16; 256];
-                            winffi::GetClassNameW(hwnd, class_buf.as_mut_ptr(), 256);
-                            let class_name = String::from_utf16_lossy(&class_buf)
-                                .trim_matches('\0')
-                                .to_lowercase();
-
-                            let is_terminal = class_name.contains("consolewindowclass")
-                                || class_name.contains("cascadiamainwindow")
-                                || class_name.contains("windows.ui.core.corewindow")
-                                || class_name.contains("putty")
-                                || class_name.contains("mobaxterm");
-                            let is_vscode = class_name == "chrome_widgetwin_1";
-
-                            FOUND_HWND.lock().unwrap().push((hwnd, is_terminal, is_vscode));
+                            FOUND_HWND.lock().unwrap().push(hwnd);
                         }
                     }
                 }
@@ -232,20 +192,18 @@ fn relay_to_terminal(msg: &str) {
             winffi::EnumWindows(enum_callback as *const () as isize, 0);
         }
 
-        // Prefer terminal > non-VSCode > any match
         let hwnd = {
             let found = FOUND_HWND.lock().unwrap();
-            found.iter()
-                .find(|(_, is_terminal, _)| *is_terminal)
-                .or_else(|| found.iter().find(|(_, _, is_vscode)| !is_vscode))
-                .or_else(|| found.first())
-                .map(|(h, _, _)| *h)
+            found.first().copied()
         };
 
         if let Some(hwnd) = hwnd {
             unsafe {
                 let prev = winffi::GetForegroundWindow();
+                winffi::ShowWindow(hwnd, winffi::SW_RESTORE);
+                std::thread::sleep(std::time::Duration::from_millis(50));
                 winffi::SetForegroundWindow(hwnd);
+                std::thread::sleep(std::time::Duration::from_millis(50));
 
                 // Ctrl+V
                 winffi::keybd_event(winffi::VK_CONTROL, 0, 0, 0);

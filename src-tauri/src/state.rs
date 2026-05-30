@@ -65,6 +65,7 @@ pub struct StateManager {
     running_variant: RunningVariant,
     variant_counter: u32,
     force_hidden: bool,
+    pub pending_messages: Vec<String>,
 }
 
 impl PetState {
@@ -144,6 +145,7 @@ impl StateManager {
             running_variant: RunningVariant::Default,
             variant_counter: 0,
             force_hidden: false,
+            pending_messages: Vec::new(),
         }
     }
 
@@ -238,6 +240,14 @@ impl StateManager {
 
     pub fn history(&self) -> &Vec<StateRecord> {
         &self.history
+    }
+
+    pub fn push_message(&mut self, msg: String) {
+        self.pending_messages.push(msg);
+    }
+
+    pub fn drain_messages(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_messages)
     }
 }
 
