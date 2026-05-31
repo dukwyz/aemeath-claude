@@ -404,4 +404,3 @@ html, body {
   0%, 100% { opacity: 0.4; transform: translateX(80px) scale(0.8); }
   50% { opacity: 1; transform: translateX(80px) scale(1.2); }
 }
-}
