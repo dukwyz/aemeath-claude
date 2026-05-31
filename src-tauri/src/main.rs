@@ -25,15 +25,6 @@ struct TauriAppState {
 
 #[tokio::main]
 async fn main() {
-    // Capture the foreground window HWND before Tauri creates its own window.
-    // At startup (triggered by Claude Code), the foreground window is the Claude Code terminal.
-    let claude_hwnd: Arc<std::sync::Mutex<isize>> = Arc::new(std::sync::Mutex::new(0));
-    unsafe {
-        let hwnd = GetForegroundWindow();
-        *claude_hwnd.lock().unwrap() = hwnd;
-        println!("Claude Code HWND bound: {}", hwnd);
-    }
-
     let state_manager = Arc::new(Mutex::new(StateManager::new()));
     let (tx, _rx) = broadcast::channel::<StateChangeEvent>(32);
     let (vis_tx, _vis_rx) = broadcast::channel::<VisibilityEvent>(4);
@@ -45,7 +36,7 @@ async fn main() {
     let tx_http = tx.clone();
     let vis_tx_http = vis_tx.clone();
     let pending_http = pending_input.clone();
-    let hwnd_http = claude_hwnd.clone();
+    let hwnd_http: Arc<std::sync::Mutex<isize>> = Arc::new(std::sync::Mutex::new(0));
 
     // Spawn HTTP server on :9527
     tokio::spawn(async move {
@@ -148,10 +139,6 @@ fn hide_window(window: tauri::Window) {
 #[tauri::command]
 fn exit_app(app: tauri::AppHandle) {
     app.exit(0);
-}
-
-extern "system" {
-    fn GetForegroundWindow() -> isize;
 }
 
 // ---- Windows FFI for relay_to_terminal ----

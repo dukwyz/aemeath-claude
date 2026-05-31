@@ -101,8 +101,9 @@ async function init() {
   let clickTimer = null;
   document.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
-    // Ask-bubble 内的点击不触发拖拽/双击逻辑
+    // Ask-bubble / quick-menu 内的点击不触发拖拽/双击逻辑
     if (e.target.closest('#ask-bubble')) return;
+    if (e.target.closest('#quick-menu')) return;
     const now = Date.now();
     if (now - lastClickTime < 200) {
       // 双击：打开 Obsidian
