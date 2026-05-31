@@ -120,7 +120,6 @@ async function init() {
   });
 
   // Right-click on sprite → quick menu
-  const spriteEl = document.getElementById('sprite');
   if (spriteEl) {
     spriteEl.addEventListener('contextmenu', (e) => {
       e.preventDefault();
