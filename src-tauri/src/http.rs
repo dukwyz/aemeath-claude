@@ -431,7 +431,7 @@ fn relay_to_terminal(msg: &str, bound_hwnd: isize) {
 
 static FOUND_HWND: std::sync::Mutex<isize> = std::sync::Mutex::new(0);
 
-const SEARCH_TERMS: &[&str] = &["claude"];
+const SEARCH_TERMS: &[&str] = &["claude", "obsidian"];
 
 unsafe extern "system" fn enum_callback(hwnd: isize, _lparam: isize) -> i32 {
     if IsWindowVisible(hwnd) == 0 {
@@ -451,6 +451,18 @@ unsafe extern "system" fn enum_callback(hwnd: isize, _lparam: isize) -> i32 {
     1 // continue
 }
 
+unsafe fn send_key_press(key: u8, flags: u32) {
+    // Win32 INPUT structure (x64): 40 bytes
+    let mut input = [0u8; 40];
+    // type = INPUT_KEYBOARD (1)
+    input[0..4].copy_from_slice(&1u32.to_le_bytes());
+    // wVk at offset 8
+    input[8..10].copy_from_slice(&key.to_le_bytes());
+    // dwFlags at offset 12
+    input[12..16].copy_from_slice(&flags.to_le_bytes());
+    SendInput(1, input.as_ptr(), 40);
+}
+
 unsafe fn paste_to_window(bound_hwnd: isize) {
     // 1. Search for the current topmost "claude" window
     *FOUND_HWND.lock().unwrap() = 0;
@@ -468,21 +480,34 @@ unsafe fn paste_to_window(bound_hwnd: isize) {
 
     let prev = GetForegroundWindow();
 
+    // Get thread IDs for input queue attachment
+    let our_tid = GetCurrentThreadId();
+    let target_tid = GetWindowThreadProcessId(hwnd, std::ptr::null_mut());
+
+    // Attach input queues so keystrokes reach the target window, not the webview
+    AttachThreadInput(our_tid, target_tid, 1);
+
     ShowWindow(hwnd, 9); // SW_RESTORE
     SetForegroundWindow(hwnd);
+    std::thread::sleep(std::time::Duration::from_millis(150));
+
+    // Ctrl+V via SendInput
+    send_key_press(0x11, 0);  // VK_CONTROL down
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    send_key_press(0x56, 0);  // VK_V down
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    send_key_press(0x56, 2);  // VK_V up
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    send_key_press(0x11, 2);  // VK_CONTROL up
     std::thread::sleep(std::time::Duration::from_millis(100));
 
-    // Ctrl+V
-    keybd_event(0x11, 0, 0, 0);
-    keybd_event(0x56, 0, 0, 0);
-    keybd_event(0x56, 0, 2, 0);
-    keybd_event(0x11, 0, 2, 0);
+    // Enter via SendInput
+    send_key_press(0x0D, 0);  // VK_RETURN down
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    send_key_press(0x0D, 2);  // VK_RETURN up
 
-    std::thread::sleep(std::time::Duration::from_millis(80));
-
-    // Enter
-    keybd_event(0x0D, 0, 0, 0);
-    keybd_event(0x0D, 0, 2, 0);
+    // Detach input queues
+    AttachThreadInput(our_tid, target_tid, 0);
 
     // Restore previous focus
     std::thread::sleep(std::time::Duration::from_millis(150));
@@ -500,5 +525,8 @@ extern "system" {
     fn SetForegroundWindow(hwnd: isize) -> i32;
     fn GetForegroundWindow() -> isize;
     fn ShowWindow(hwnd: isize, cmd: i32) -> i32;
-    fn keybd_event(vk: u8, scan: u8, flags: u32, extra: usize);
+    fn AttachThreadInput(idAttach: u32, idAttachTo: u32, fAttach: i32) -> i32;
+    fn GetWindowThreadProcessId(hWnd: isize, lpdwProcessId: *mut u32) -> u32;
+    fn GetCurrentThreadId() -> u32;
+    fn SendInput(nInputs: u32, pInputs: *const u8, cbSize: i32) -> u32;
 }
